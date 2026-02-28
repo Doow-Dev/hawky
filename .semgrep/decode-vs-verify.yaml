@@ -1,0 +1,93 @@
+rules:
+  - id: hawky.security.jwt-decode-without-verify
+    message: |
+      jwt.decode() or decodeToken() does not verify the token signature.
+      An attacker can forge tokens by modifying the payload.
+      Use jwt.verify() or verifyToken() instead for authentication decisions.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      owasp: "A02:2021 - Cryptographic Failures"
+      hawky-rule: true
+    pattern-either:
+      # Direct jwt.decode() calls
+      - pattern: jwt.decode($TOKEN)
+      - pattern: jwt.decode($TOKEN, $OPTIONS)
+      - pattern: jsonwebtoken.decode($TOKEN)
+      - pattern: jsonwebtoken.decode($TOKEN, $OPTIONS)
+      # Common decode function names
+      - pattern: decodeToken($TOKEN)
+      - pattern: decodeJwt($TOKEN)
+      - pattern: jwtDecode($TOKEN)
+      - pattern: decode($TOKEN)
+    paths:
+      include:
+        - "**/auth/**"
+        - "**/authentication/**"
+        - "**/middleware/**"
+        - "**/guard/**"
+        - "**/guards/**"
+        - "**/*auth*"
+        - "**/*guard*"
+        - "**/*middleware*"
+        - "**/*token*"
+        - "**/*jwt*"
+        - "**/*session*"
+
+  - id: hawky.security.jwt-decode-for-user-id
+    message: |
+      Using decoded (unverified) JWT claims for user identification is insecure.
+      An attacker can set any user ID by modifying the token payload.
+      Verify the token first with jwt.verify() before extracting claims.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      owasp: "A02:2021 - Cryptographic Failures"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $DECODED = jwt.decode($TOKEN)
+              ...
+              $DECODED.$CLAIM
+          - pattern: |
+              $DECODED = decodeToken($TOKEN)
+              ...
+              $DECODED.$CLAIM
+          - pattern: |
+              const { $CLAIMS } = jwt.decode($TOKEN)
+          - pattern: |
+              const { $CLAIMS } = decodeToken($TOKEN)
+      - metavariable-regex:
+          metavariable: $CLAIM
+          regex: "(?i)(user_?id|userId|sub|subject|email|role|roles|permissions|admin|org_?id|tenant_?id)"
+
+  - id: hawky.security.jwt-decode-in-auth-check
+    message: |
+      Using jwt.decode() in authorization/authentication check is dangerous.
+      decode() only parses the token without verifying the signature.
+      Replace with jwt.verify(token, secret) to ensure token authenticity.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      owasp: "A02:2021 - Cryptographic Failures"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: |
+              if (...jwt.decode(...)...) { ... }
+          - pattern: |
+              if (...decodeToken(...)...) { ... }
+          - pattern: |
+              $VAR = jwt.decode($TOKEN)
+              ...
+              if (...$VAR...) { ... }
