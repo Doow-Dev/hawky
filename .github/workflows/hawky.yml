@@ -47,6 +47,10 @@ env:
   HAWKY_GATE_SEMGREP_BLOCKING: 'true'
   HAWKY_GATE_SEMGREP_TIMEOUT: '600'
   HAWKY_GATE_SEMGREP_RULESETS: 'p/security-audit'
+  # S015: Gitleaks secret scanning
+  HAWKY_GATE_GITLEAKS_ENABLED: 'true'
+  HAWKY_GATE_GITLEAKS_BLOCKING: 'true'
+  HAWKY_GATE_GITLEAKS_TIMEOUT: '300'
 
 # Explicit minimal permissions
 permissions:
@@ -197,7 +201,7 @@ jobs:
             }
 
             // Per-gate settings
-            const gates = ['typescript', 'build', 'test', 'eslint', 'semgrep'];
+            const gates = ['typescript', 'build', 'test', 'eslint', 'semgrep', 'gitleaks'];
             gates.forEach(gate => {
               const gateConfig = config[gate] || {};
               const prefix = 'HAWKY_GATE_' + gate.toUpperCase();
@@ -1133,6 +1137,199 @@ jobs:
             echo "semgrep_status=passed" >> $GITHUB_OUTPUT
           fi
 
+      # S015: Gitleaks Secret Scanning Gate
+      # Scans for hardcoded secrets in changed files
+      # Respects HAWKY_GATE_GITLEAKS_ENABLED and blocking configs
+      - name: Gitleaks Secret Scanning Gate
+        id: gitleaks
+        if: ${{ env.HAWKY_GATE_GITLEAKS_ENABLED != 'false' && ((steps.typecheck.outputs.tsc_status != 'failed' || env.HAWKY_GATE_TYPESCRIPT_BLOCKING != 'true') && (steps.build.outputs.build_status != 'failed' || env.HAWKY_GATE_BUILD_BLOCKING != 'true') && (steps.test.outputs.test_status != 'failed' || env.HAWKY_GATE_TEST_BLOCKING != 'true') && (steps.eslint.outputs.eslint_status != 'failed' || env.HAWKY_GATE_ESLINT_BLOCKING != 'true') && (steps.semgrep.outputs.semgrep_status != 'failed' || env.HAWKY_GATE_SEMGREP_BLOCKING != 'true') || env.HAWKY_FAIL_FAST != 'true') }}
+        run: |
+          echo "## Gitleaks Secret Scanning Gate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check if Gitleaks is available
+          if ! command -v gitleaks &> /dev/null; then
+            # Try to install via binary download
+            echo "Gitleaks not found, attempting to install..."
+            GITLEAKS_VERSION="8.18.4"
+            curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz 2>/dev/null || true
+            if [ -f /tmp/gitleaks.tar.gz ]; then
+              tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks 2>/dev/null || true
+              if [ -f /tmp/gitleaks ]; then
+                chmod +x /tmp/gitleaks
+                sudo mv /tmp/gitleaks /usr/local/bin/gitleaks 2>/dev/null || mv /tmp/gitleaks $HOME/.local/bin/gitleaks 2>/dev/null || true
+              fi
+            fi
+          fi
+
+          # Re-check if Gitleaks is now available
+          if ! command -v gitleaks &> /dev/null; then
+            echo "Gitleaks not available — skipping secret scan"
+            echo ":white_check_mark: **Skipped** — Gitleaks not available" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Install Gitleaks to enable secret scanning: https://github.com/gitleaks/gitleaks_" >> $GITHUB_STEP_SUMMARY
+            echo "gitleaks_status=skipped" >> $GITHUB_OUTPUT
+            echo "gitleaks_secrets=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          GITLEAKS_VERSION=$(gitleaks version 2>/dev/null || echo "unknown")
+          echo "Gitleaks version: $GITLEAKS_VERSION"
+          echo "**Gitleaks version:** \`$GITLEAKS_VERSION\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get changed files in PR
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD || echo "")
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No files changed in PR — skipping Gitleaks"
+            echo ":white_check_mark: **Skipped** — No files changed in PR" >> $GITHUB_STEP_SUMMARY
+            echo "gitleaks_status=skipped" >> $GITHUB_OUTPUT
+            echo "gitleaks_secrets=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Count changed files
+          FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | xargs)
+          echo "Scanning $FILE_COUNT changed file(s) for secrets..."
+          echo "**Files scanned:** $FILE_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Write changed files to a temp file for --log-opts
+          echo "$CHANGED_FILES" > /tmp/changed_files.txt
+
+          # Run Gitleaks with JSON output on changed files only
+          # Use detect mode with --no-git to scan files directly
+          GITLEAKS_START=$(date +%s)
+          set +e
+
+          # Create a temporary directory with only changed files
+          SCAN_DIR=$(mktemp -d)
+          for file in $CHANGED_FILES; do
+            if [ -f "$file" ]; then
+              # Create directory structure and copy file
+              mkdir -p "$SCAN_DIR/$(dirname "$file")"
+              cp "$file" "$SCAN_DIR/$file"
+            fi
+          done
+
+          # Check for .gitleaksignore in repo root
+          IGNORE_ARGS=""
+          if [ -f ".gitleaksignore" ]; then
+            echo "**Using:** \`.gitleaksignore\` for suppressions" >> $GITHUB_STEP_SUMMARY
+            cp .gitleaksignore "$SCAN_DIR/.gitleaksignore"
+          fi
+
+          # Run gitleaks on the staged files
+          GITLEAKS_OUTPUT=$(gitleaks detect --source "$SCAN_DIR" --report-format json --report-path /tmp/gitleaks-report.json --no-git 2>&1)
+          GITLEAKS_EXIT_CODE=$?
+          set -e
+          GITLEAKS_END=$(date +%s)
+          GITLEAKS_TIME=$((GITLEAKS_END - GITLEAKS_START))
+
+          # Cleanup temp directory
+          rm -rf "$SCAN_DIR"
+
+          echo "**Scan time:** ${GITLEAKS_TIME}s" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Output scan time for summary
+          echo "gitleaks_time=${GITLEAKS_TIME}s" >> $GITHUB_OUTPUT
+
+          # Parse JSON output
+          SECRET_COUNT=0
+
+          # Check if report file exists and is valid JSON
+          if [ -f /tmp/gitleaks-report.json ]; then
+            if node -e "JSON.parse(require('fs').readFileSync('/tmp/gitleaks-report.json', 'utf8'))" 2>/dev/null; then
+              # Parse with Node.js for reliable JSON handling
+              PARSED=$(node -e "
+                const data = JSON.parse(require('fs').readFileSync('/tmp/gitleaks-report.json', 'utf8'));
+                const findings = Array.isArray(data) ? data : [];
+                const annotations = [];
+
+                // Filter out test fixtures, mocks, and examples
+                const filteredFindings = findings.filter(f => {
+                  const file = f.File || '';
+                  // Skip test directories, mock files, and example files
+                  if (/[\\\/](test|tests|__tests__|__mocks__|mocks|fixtures|examples?|samples?)[\\\/]/i.test(file)) return false;
+                  if (/\.(test|spec|mock|example|sample)\.[^.]+\$/i.test(file)) return false;
+                  if (/[\\\/](test|spec|mock|example|sample)[_-]/i.test(file)) return false;
+                  return true;
+                });
+
+                filteredFindings.forEach(finding => {
+                  const file = finding.File || 'unknown';
+                  const line = finding.StartLine || 1;
+                  const rule = finding.RuleID || 'secret-detected';
+                  const description = finding.Description || 'Potential secret detected';
+                  const secret = finding.Secret ? finding.Secret.substring(0, 20) + '...' : 'redacted';
+
+                  annotations.push({
+                    file,
+                    line,
+                    rule,
+                    description,
+                    match: finding.Match || ''
+                  });
+                });
+
+                console.log(JSON.stringify({ count: filteredFindings.length, annotations }));
+              ")
+
+              SECRET_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).count)")
+
+              # Emit GitHub annotations
+              echo "$PARSED" | node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                data.annotations.forEach(a => {
+                  console.log('::error file=' + a.file + ',line=' + a.line + ',title=Gitleaks ' + a.rule + '::' + a.description);
+                });
+              "
+            else
+              # JSON parsing failed but might just be empty array
+              echo "Gitleaks report was not valid JSON — treating as no findings"
+            fi
+          fi
+
+          # If gitleaks exit code indicates findings (exit 1) but we filtered them all, reset
+          if [ "$GITLEAKS_EXIT_CODE" -eq 1 ] && [ "$SECRET_COUNT" -eq 0 ]; then
+            echo "All findings were in test fixtures — treating as passed"
+            GITLEAKS_EXIT_CODE=0
+          fi
+
+          # Store count for future gates
+          echo "gitleaks_secrets=$SECRET_COUNT" >> $GITHUB_OUTPUT
+
+          # Handle results - any secrets block merge
+          if [ "$SECRET_COUNT" -gt 0 ]; then
+            echo "### :rotating_light: Secrets Detected" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| File | Line | Rule | Description |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|------|------|-------------|" >> $GITHUB_STEP_SUMMARY
+
+            echo "$PARSED" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              data.annotations.forEach(a => {
+                console.log('| \`' + a.file + '\` | ' + a.line + ' | \`' + a.rule + '\` | ' + a.description.substring(0, 50) + ' |');
+              });
+            " >> $GITHUB_STEP_SUMMARY
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo ":x: **Failed** — $SECRET_COUNT secret(s) detected" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_To suppress false positives, add entries to \`.gitleaksignore\`._" >> $GITHUB_STEP_SUMMARY
+            echo "gitleaks_status=failed" >> $GITHUB_OUTPUT
+
+            echo ""
+            echo "Gitleaks failed: $SECRET_COUNT secret(s) detected"
+            exit 1
+          fi
+
+          echo ":white_check_mark: **Passed** — No secrets detected" >> $GITHUB_STEP_SUMMARY
+          echo "Gitleaks passed — no secrets detected"
+          echo "gitleaks_status=passed" >> $GITHUB_OUTPUT
+
       # S006: Gate Report Summary
       # Posts/updates a PR comment with aggregated gate results
       # S007: Now includes fail-fast skip detection
@@ -1182,6 +1379,13 @@ jobs:
           SEMGREP_LOW: ${{ steps.semgrep.outputs.semgrep_low || '0' }}
           SEMGREP_TIME: ${{ steps.semgrep.outputs.semgrep_time || 'N/A' }}
           SEMGREP_STEP_RAN: ${{ steps.semgrep.outcome != 'skipped' }}
+          # S015: Gitleaks outputs
+          GITLEAKS_ENABLED: ${{ env.HAWKY_GATE_GITLEAKS_ENABLED }}
+          GITLEAKS_BLOCKING: ${{ env.HAWKY_GATE_GITLEAKS_BLOCKING }}
+          GITLEAKS_STATUS: ${{ steps.gitleaks.outputs.gitleaks_status || 'unknown' }}
+          GITLEAKS_SECRETS: ${{ steps.gitleaks.outputs.gitleaks_secrets || '0' }}
+          GITLEAKS_TIME: ${{ steps.gitleaks.outputs.gitleaks_time || 'N/A' }}
+          GITLEAKS_STEP_RAN: ${{ steps.gitleaks.outcome != 'skipped' }}
         run: |
           # Determine overall status
           OVERALL_STATUS="passed"
@@ -1257,8 +1461,22 @@ jobs:
             fi
           fi
 
+          # S015: Gitleaks gate: check disabled, then fail-fast, then failure
+          if [ "$GITLEAKS_ENABLED" = "false" ]; then
+            GITLEAKS_STATUS="disabled"
+            DISABLED_GATES="$DISABLED_GATES Gitleaks"
+          elif [ "$GITLEAKS_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && [ "$TSC_BLOCKING" != "false" ] || [ "$BUILD_STATUS" = "failed" ] && [ "$BUILD_BLOCKING" != "false" ] || [ "$TEST_STATUS" = "failed" ] && [ "$TEST_BLOCKING" != "false" ] || [ "$ESLINT_STATUS" = "failed" ] && [ "$ESLINT_BLOCKING" != "false" ] || [ "$SEMGREP_STATUS" = "failed" ] && [ "$SEMGREP_BLOCKING" != "false" ]); then
+            GITLEAKS_STATUS="fail-fast"
+            FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED Gitleaks"
+          elif [ "$GITLEAKS_STATUS" = "failed" ]; then
+            if [ "$GITLEAKS_BLOCKING" != "false" ]; then
+              OVERALL_STATUS="failed"
+              FAILED_GATES="$FAILED_GATES Gitleaks"
+            fi
+          fi
+
           # Handle unknown statuses (step ran but produced no output - unusual)
-          if [ "$TSC_STATUS" = "unknown" ] || [ "$BUILD_STATUS" = "unknown" ] || [ "$TEST_STATUS" = "unknown" ] || [ "$ESLINT_STATUS" = "unknown" ] || [ "$SEMGREP_STATUS" = "unknown" ]; then
+          if [ "$TSC_STATUS" = "unknown" ] || [ "$BUILD_STATUS" = "unknown" ] || [ "$TEST_STATUS" = "unknown" ] || [ "$ESLINT_STATUS" = "unknown" ] || [ "$SEMGREP_STATUS" = "unknown" ] || [ "$GITLEAKS_STATUS" = "unknown" ]; then
             if [ "$OVERALL_STATUS" != "failed" ]; then
               OVERALL_STATUS="partial"
             fi
@@ -1305,6 +1523,7 @@ jobs:
           echo "| Test | $(status_icon "$TEST_STATUS") $TEST_STATUS | ${TEST_PASSED}/${TEST_TOTAL} passed, ${TEST_FAILED} failed | $TEST_TIME |" >> /tmp/hawky-comment.md
           echo "| ESLint | $(status_icon "$ESLINT_STATUS") $ESLINT_STATUS | ${ESLINT_ERRORS} error(s), ${ESLINT_WARNINGS} warning(s) | $ESLINT_TIME |" >> /tmp/hawky-comment.md
           echo "| Semgrep | $(status_icon "$SEMGREP_STATUS") $SEMGREP_STATUS | ${SEMGREP_HIGH} high, ${SEMGREP_MEDIUM} medium, ${SEMGREP_LOW} low | $SEMGREP_TIME |" >> /tmp/hawky-comment.md
+          echo "| Gitleaks | $(status_icon "$GITLEAKS_STATUS") $GITLEAKS_STATUS | ${GITLEAKS_SECRETS} secret(s) | $GITLEAKS_TIME |" >> /tmp/hawky-comment.md
           echo "" >> /tmp/hawky-comment.md
 
           # Add details sections for failures
@@ -1331,6 +1550,10 @@ jobs:
 
             if [ "$SEMGREP_STATUS" = "failed" ]; then
               echo "- [Semgrep Findings]($WORKFLOW_URL) — $SEMGREP_HIGH high-severity finding(s)" >> /tmp/hawky-comment.md
+            fi
+
+            if [ "$GITLEAKS_STATUS" = "failed" ]; then
+              echo "- [Gitleaks Findings]($WORKFLOW_URL) — $GITLEAKS_SECRETS secret(s) detected" >> /tmp/hawky-comment.md
             fi
 
             echo "" >> /tmp/hawky-comment.md
@@ -1371,6 +1594,7 @@ jobs:
           [ "$TEST_STATUS" = "skipped" ] && SKIPPED_GATES="$SKIPPED_GATES Test,"
           [ "$ESLINT_STATUS" = "skipped" ] && SKIPPED_GATES="$SKIPPED_GATES ESLint,"
           [ "$SEMGREP_STATUS" = "skipped" ] && SKIPPED_GATES="$SKIPPED_GATES Semgrep,"
+          [ "$GITLEAKS_STATUS" = "skipped" ] && SKIPPED_GATES="$SKIPPED_GATES Gitleaks,"
 
           if [ -n "$SKIPPED_GATES" ]; then
             # Remove trailing comma

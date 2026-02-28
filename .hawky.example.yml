@@ -46,6 +46,13 @@ gates:
     timeout: 600       # Default: 600 (10 min)
     # rulesets: "p/security-audit p/typescript"  # Space-separated ruleset IDs. Default: p/security-audit
 
+  # Gitleaks secret scanning (S015)
+  gitleaks:
+    enabled: true
+    blocking: true     # Any detected secrets block merge by default
+    timeout: 300       # Default: 300 (5 min)
+    # Note: Use .gitleaksignore file for suppressions (e.g., test fixtures, examples)
+
 # Example: Disable ESLint temporarily during migration
 # gates:
 #   eslint:
