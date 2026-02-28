@@ -6,6 +6,7 @@
  */
 
 import * as core from '@actions/core';
+import { loadConfigFromCwd, GATE_NAMES, type HawkyConfig, type GateName } from './config';
 
 /**
  * Parsed action inputs
@@ -58,15 +59,59 @@ async function run(): Promise<void> {
     core.info(`  - Gates: ${inputs.gates.join(', ')}`);
     core.info(`  - Config path: ${inputs.configPath}`);
 
-    // Log start group for gate execution
-    core.startGroup('Gate Configuration');
-    core.info(`Running ${inputs.gates.length} gates:`);
-    for (const gate of inputs.gates) {
-      core.info(`  - ${gate}`);
+    // S097: Load and parse config from configPath
+    core.startGroup('Loading Configuration');
+    const configResult = loadConfigFromCwd(inputs.configPath);
+    const config: HawkyConfig = configResult.config;
+
+    if (configResult.configFound) {
+      core.info(`Loaded config from: ${configResult.configPath}`);
+    } else {
+      core.info('No .hawky.yml found — using defaults');
+    }
+
+    // Log any config warnings
+    for (const warning of configResult.warnings) {
+      core.warning(`Config warning [${warning.field}]: ${warning.message}`);
+    }
+
+    // Merge action inputs with config (action inputs take precedence)
+    // fail_fast from action input overrides config
+    const effectiveFailFast = inputs.failFast !== undefined ? inputs.failFast : config.failFast;
+
+    core.info(`Effective configuration:`);
+    core.info(`  - Fail fast: ${effectiveFailFast}`);
+    core.info(`  - Config file: ${configResult.configPath || 'defaults'}`);
+
+    // Log grace period status
+    if (config.gracePeriod.active) {
+      core.info(`  - Grace period: ACTIVE (ends ${config.gracePeriod.endDate})`);
     }
     core.endGroup();
 
-    // TODO(@Luna, 2026-02-28): S097 - Load and parse config from configPath
+    // Determine which gates to run (from action input or all enabled in config)
+    let gatesToRun: GateName[];
+    if (inputs.gates.length > 0) {
+      // Filter to only valid gate names
+      gatesToRun = inputs.gates.filter((g): g is GateName =>
+        GATE_NAMES.includes(g as GateName)
+      );
+    } else {
+      // Run all enabled gates
+      gatesToRun = GATE_NAMES.filter((g) => config.gates[g].enabled);
+    }
+
+    // Log gate configuration
+    core.startGroup('Gate Configuration');
+    core.info(`Running ${gatesToRun.length} gates:`);
+    for (const gate of gatesToRun) {
+      const gateConfig = config.gates[gate];
+      const status = gateConfig.enabled ? 'enabled' : 'disabled';
+      const blocking = gateConfig.blocking ? 'blocking' : 'non-blocking';
+      core.info(`  - ${gate}: ${status}, ${blocking}, timeout=${gateConfig.timeout}s`);
+    }
+    core.endGroup();
+
     // TODO(@Luna, 2026-02-28): S098 - Load baseline for comparison
     // TODO(@Luna, 2026-02-28): S099 - Load hawkyignore patterns
     // TODO(@Luna, 2026-02-28): S100-S103 - Run individual gates
