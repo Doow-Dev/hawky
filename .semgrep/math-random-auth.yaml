@@ -1,0 +1,59 @@
+rules:
+  - id: hawky.security.math-random-in-auth
+    message: |
+      Math.random() is not cryptographically secure and should not be used in authentication contexts.
+      Use crypto.randomBytes(), crypto.randomUUID(), or crypto.getRandomValues() instead.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-330: Use of Insufficiently Random Values"
+      owasp: "A02:2021 - Cryptographic Failures"
+      hawky-rule: true
+    pattern: Math.random()
+    paths:
+      include:
+        - "**/auth/**"
+        - "**/authentication/**"
+        - "**/login/**"
+        - "**/session/**"
+        - "**/token/**"
+        - "**/jwt/**"
+        - "**/password/**"
+        - "**/credential/**"
+        - "**/secret/**"
+        - "**/crypto/**"
+        - "**/security/**"
+        - "**/*auth*"
+        - "**/*login*"
+        - "**/*session*"
+        - "**/*token*"
+        - "**/*password*"
+        - "**/*credential*"
+        - "**/*secret*"
+        - "**/*security*"
+
+  - id: hawky.security.math-random-for-tokens
+    message: |
+      Math.random() used for token/key/secret generation is insecure.
+      Use crypto.randomBytes() or crypto.randomUUID() instead.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-330: Use of Insufficiently Random Values"
+      owasp: "A02:2021 - Cryptographic Failures"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: const $TOKEN = Math.random()
+          - pattern: let $TOKEN = Math.random()
+          - pattern: var $TOKEN = Math.random()
+          - pattern: const $TOKEN = Math.random().toString(...)
+          - pattern: let $TOKEN = Math.random().toString(...)
+          - pattern: var $TOKEN = Math.random().toString(...)
+      - metavariable-regex:
+          metavariable: $TOKEN
+          regex: "(?i).*(token|key|secret|nonce|salt|hash|uuid|session|code|otp|pin).*"
