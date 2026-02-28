@@ -1,0 +1,55 @@
+# Hawky Configuration File
+# Place this file at the root of your repository as .hawky.yml or .hawky.yaml
+#
+# All settings are optional - Hawky uses sensible defaults when not specified:
+# - All gates enabled
+# - All gates are blocking (failures stop the workflow)
+# - Fail-fast mode enabled (stops on first blocking failure)
+
+# Global fail-fast setting
+# When true, subsequent gates are skipped if a blocking gate fails
+# Default: true
+fail_fast: true
+
+# Gate configuration
+gates:
+  # TypeScript type checking
+  typescript:
+    enabled: true      # Run this gate? Default: true
+    blocking: true     # Block merge on failure? Default: true
+    timeout: 300       # Timeout in seconds. Default: 300 (5 min)
+
+  # Build step (npm run build, etc.)
+  build:
+    enabled: true
+    blocking: true
+    timeout: 600       # Default: 600 (10 min)
+    # command: "yarn build"  # Override build command (otherwise uses package.json or .claude/COMMANDS.md)
+
+  # Test suite
+  test:
+    enabled: true
+    blocking: true
+    timeout: 600       # Default: 600 (10 min)
+    # command: "yarn test --ci"  # Override test command
+
+  # ESLint linting
+  eslint:
+    enabled: true
+    blocking: false    # Non-blocking: warnings shown but don't fail the PR
+    timeout: 300       # Default: 300 (5 min)
+
+# Example: Disable ESLint temporarily during migration
+# gates:
+#   eslint:
+#     enabled: false
+
+# Example: Make test failures non-blocking during adoption
+# gates:
+#   test:
+#     blocking: false
+
+# Example: Use custom test command
+# gates:
+#   test:
+#     command: "npm run test:ci -- --coverage"

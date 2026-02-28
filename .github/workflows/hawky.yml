@@ -22,10 +22,26 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-# Fail-fast configuration: stop subsequent gates when a blocking gate fails
-# Set HAWKY_FAIL_FAST to 'false' to run all gates regardless of prior failures
+# Default configuration (can be overridden by .hawky.yml)
+# - HAWKY_FAIL_FAST: stop subsequent gates when a blocking gate fails
+# - Gate-specific settings: enable/disable, blocking/non-blocking, custom commands, timeouts
 env:
   HAWKY_FAIL_FAST: 'true'
+  # Defaults - all gates enabled and blocking
+  HAWKY_GATE_TYPESCRIPT_ENABLED: 'true'
+  HAWKY_GATE_TYPESCRIPT_BLOCKING: 'true'
+  HAWKY_GATE_TYPESCRIPT_TIMEOUT: '300'
+  HAWKY_GATE_BUILD_ENABLED: 'true'
+  HAWKY_GATE_BUILD_BLOCKING: 'true'
+  HAWKY_GATE_BUILD_TIMEOUT: '600'
+  HAWKY_GATE_BUILD_COMMAND: ''
+  HAWKY_GATE_TEST_ENABLED: 'true'
+  HAWKY_GATE_TEST_BLOCKING: 'true'
+  HAWKY_GATE_TEST_TIMEOUT: '600'
+  HAWKY_GATE_TEST_COMMAND: ''
+  HAWKY_GATE_ESLINT_ENABLED: 'true'
+  HAWKY_GATE_ESLINT_BLOCKING: 'true'
+  HAWKY_GATE_ESLINT_TIMEOUT: '300'
 
 # Explicit minimal permissions
 permissions:
@@ -86,6 +102,133 @@ jobs:
           echo "head_ref=${{ github.head_ref }}" >> $GITHUB_OUTPUT
           echo "base_ref=${{ github.base_ref }}" >> $GITHUB_OUTPUT
 
+      # S008: Parse .hawky.yml configuration file
+      - name: Parse Hawky Configuration
+        id: config
+        run: |
+          echo "## Hawky Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Look for config file
+          CONFIG_FILE=""
+          if [ -f ".hawky.yml" ]; then
+            CONFIG_FILE=".hawky.yml"
+          elif [ -f ".hawky.yaml" ]; then
+            CONFIG_FILE=".hawky.yaml"
+          fi
+
+          if [ -z "$CONFIG_FILE" ]; then
+            echo "No .hawky.yml found — using defaults"
+            echo ":gear: **Using defaults** — No configuration file found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Create a \`.hawky.yml\` file to customize gate behavior._" >> $GITHUB_STEP_SUMMARY
+            echo "config_found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Found configuration: $CONFIG_FILE"
+          echo ":gear: **Using config from:** \`$CONFIG_FILE\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "config_found=true" >> $GITHUB_OUTPUT
+
+          # Parse YAML using Node.js (js-yaml or inline parsing)
+          # We use a lightweight inline parser to avoid extra dependencies
+          node -e "
+            const fs = require('fs');
+            const yaml = fs.readFileSync('$CONFIG_FILE', 'utf8');
+
+            // Simple YAML parser for our flat config structure
+            const config = {};
+            let currentGate = null;
+
+            yaml.split('\n').forEach(line => {
+              // Skip comments and empty lines
+              if (line.trim().startsWith('#') || line.trim() === '') return;
+
+              // Top-level key (no indentation)
+              const topMatch = line.match(/^(\w+):\s*(.*)$/);
+              if (topMatch) {
+                const [, key, value] = topMatch;
+                if (key === 'gates') {
+                  currentGate = null;
+                } else if (key === 'fail_fast') {
+                  config.fail_fast = value.trim() === 'true';
+                }
+                return;
+              }
+
+              // Gate name (2-space indent)
+              const gateMatch = line.match(/^  (\w+):\s*$/);
+              if (gateMatch) {
+                currentGate = gateMatch[1];
+                config[currentGate] = {};
+                return;
+              }
+
+              // Gate property (4-space indent)
+              const propMatch = line.match(/^    (\w+):\s*(.+)$/);
+              if (propMatch && currentGate) {
+                const [, prop, value] = propMatch;
+                let parsedValue = value.trim();
+
+                // Handle booleans
+                if (parsedValue === 'true') parsedValue = true;
+                else if (parsedValue === 'false') parsedValue = false;
+                // Handle numbers
+                else if (/^\d+$/.test(parsedValue)) parsedValue = parseInt(parsedValue, 10);
+                // Handle quoted strings
+                else if (/^[\"'].*[\"']$/.test(parsedValue)) parsedValue = parsedValue.slice(1, -1);
+
+                config[currentGate][prop] = parsedValue;
+              }
+            });
+
+            // Output environment variables for each setting
+            const envVars = [];
+
+            // Global fail_fast
+            if (config.fail_fast !== undefined) {
+              envVars.push('HAWKY_FAIL_FAST=' + (config.fail_fast ? 'true' : 'false'));
+            }
+
+            // Per-gate settings
+            const gates = ['typescript', 'build', 'test', 'eslint'];
+            gates.forEach(gate => {
+              const gateConfig = config[gate] || {};
+              const prefix = 'HAWKY_GATE_' + gate.toUpperCase();
+
+              if (gateConfig.enabled !== undefined) {
+                envVars.push(prefix + '_ENABLED=' + (gateConfig.enabled ? 'true' : 'false'));
+              }
+              if (gateConfig.blocking !== undefined) {
+                envVars.push(prefix + '_BLOCKING=' + (gateConfig.blocking ? 'true' : 'false'));
+              }
+              if (gateConfig.timeout !== undefined) {
+                envVars.push(prefix + '_TIMEOUT=' + gateConfig.timeout);
+              }
+              if (gateConfig.command !== undefined) {
+                envVars.push(prefix + '_COMMAND=' + gateConfig.command);
+              }
+            });
+
+            // Output to GITHUB_ENV (each on new line)
+            envVars.forEach(v => console.log(v));
+
+            // Also output to summary
+            console.error('Config parsed:');
+            console.error(JSON.stringify(config, null, 2));
+          " >> $GITHUB_ENV 2>> $GITHUB_STEP_SUMMARY
+
+          # Show parsed config in summary
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details>" >> $GITHUB_STEP_SUMMARY
+          echo "<summary>Raw config file</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`yaml" >> $GITHUB_STEP_SUMMARY
+          cat "$CONFIG_FILE" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
       # Install dependencies (if not cached)
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -99,8 +242,10 @@ jobs:
           fi
 
       # S002: TypeScript Strict Gate
+      # S008: Respects HAWKY_GATE_TYPESCRIPT_ENABLED config
       - name: TypeScript Strict Gate
         id: typecheck
+        if: ${{ env.HAWKY_GATE_TYPESCRIPT_ENABLED != 'false' }}
         run: |
           echo "## TypeScript Strict Gate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -179,10 +324,11 @@ jobs:
           exit 1
 
       # S003: Build Gate
-      # Skipped if TypeScript gate failed (fail-fast mode)
+      # S008: Respects HAWKY_GATE_BUILD_ENABLED and HAWKY_GATE_TYPESCRIPT_BLOCKING configs
+      # Skipped if TypeScript gate failed (fail-fast mode) AND TypeScript is blocking
       - name: Build Gate
         id: build
-        if: ${{ steps.typecheck.outputs.tsc_status != 'failed' || env.HAWKY_FAIL_FAST != 'true' }}
+        if: ${{ env.HAWKY_GATE_BUILD_ENABLED != 'false' && (steps.typecheck.outputs.tsc_status != 'failed' || env.HAWKY_GATE_TYPESCRIPT_BLOCKING != 'true' || env.HAWKY_FAIL_FAST != 'true') }}
         run: |
           echo "## Build Gate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -190,8 +336,14 @@ jobs:
           BUILD_CMD=""
           BUILD_SOURCE=""
 
+          # Priority 0: Check for config command override (S008)
+          if [ -n "$HAWKY_GATE_BUILD_COMMAND" ]; then
+            BUILD_CMD="$HAWKY_GATE_BUILD_COMMAND"
+            BUILD_SOURCE=".hawky.yml"
+          fi
+
           # Priority 1: Check .claude/COMMANDS.md for build command
-          if [ -f ".claude/COMMANDS.md" ]; then
+          if [ -z "$BUILD_CMD" ] && [ -f ".claude/COMMANDS.md" ]; then
             # Look for build command in COMMANDS.md (format: "build: <command>" or "Build: <command>")
             COMMANDS_BUILD=$(grep -iE "^(build|Build):\s*" .claude/COMMANDS.md | head -1 | sed 's/^[Bb]uild:\s*//' | xargs)
             if [ -n "$COMMANDS_BUILD" ]; then
@@ -279,10 +431,11 @@ jobs:
           echo "Build passed in ${BUILD_TIME}s ($WARNING_COUNT warnings)"
 
       # S004: Test Gate
+      # S008: Respects HAWKY_GATE_TEST_ENABLED and blocking configs
       # Skipped if any prior blocking gate failed (fail-fast mode)
       - name: Test Gate
         id: test
-        if: ${{ (steps.typecheck.outputs.tsc_status != 'failed' && steps.build.outputs.build_status != 'failed') || env.HAWKY_FAIL_FAST != 'true' }}
+        if: ${{ env.HAWKY_GATE_TEST_ENABLED != 'false' && ((steps.typecheck.outputs.tsc_status != 'failed' || env.HAWKY_GATE_TYPESCRIPT_BLOCKING != 'true') && (steps.build.outputs.build_status != 'failed' || env.HAWKY_GATE_BUILD_BLOCKING != 'true') || env.HAWKY_FAIL_FAST != 'true') }}
         run: |
           echo "## Test Gate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -290,8 +443,14 @@ jobs:
           TEST_CMD=""
           TEST_SOURCE=""
 
+          # Priority 0: Check for config command override (S008)
+          if [ -n "$HAWKY_GATE_TEST_COMMAND" ]; then
+            TEST_CMD="$HAWKY_GATE_TEST_COMMAND"
+            TEST_SOURCE=".hawky.yml"
+          fi
+
           # Priority 1: Check .claude/COMMANDS.md for test command
-          if [ -f ".claude/COMMANDS.md" ]; then
+          if [ -z "$TEST_CMD" ] && [ -f ".claude/COMMANDS.md" ]; then
             # Look for test command in COMMANDS.md (format: "test: <command>" or "Test: <command>")
             COMMANDS_TEST=$(grep -iE "^(test|Test):\s*" .claude/COMMANDS.md | head -1 | sed 's/^[Tt]est:\s*//' | xargs)
             if [ -n "$COMMANDS_TEST" ]; then
@@ -464,10 +623,11 @@ jobs:
           echo "Tests passed: $PASSED passed, $SKIPPED skipped in ${TEST_TIME}s"
 
       # S005: ESLint Gate
+      # S008: Respects HAWKY_GATE_ESLINT_ENABLED and blocking configs
       # Skipped if any prior blocking gate failed (fail-fast mode)
       - name: ESLint Gate
         id: eslint
-        if: ${{ (steps.typecheck.outputs.tsc_status != 'failed' && steps.build.outputs.build_status != 'failed' && steps.test.outputs.test_status != 'failed') || env.HAWKY_FAIL_FAST != 'true' }}
+        if: ${{ env.HAWKY_GATE_ESLINT_ENABLED != 'false' && ((steps.typecheck.outputs.tsc_status != 'failed' || env.HAWKY_GATE_TYPESCRIPT_BLOCKING != 'true') && (steps.build.outputs.build_status != 'failed' || env.HAWKY_GATE_BUILD_BLOCKING != 'true') && (steps.test.outputs.test_status != 'failed' || env.HAWKY_GATE_TEST_BLOCKING != 'true') || env.HAWKY_FAIL_FAST != 'true') }}
         run: |
           echo "## ESLint Gate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -699,12 +859,23 @@ jobs:
       # S006: Gate Report Summary
       # Posts/updates a PR comment with aggregated gate results
       # S007: Now includes fail-fast skip detection
+      # S008: Now includes disabled gate detection from .hawky.yml config
       - name: Gate Report Summary
         id: report
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           FAIL_FAST_ENABLED: ${{ env.HAWKY_FAIL_FAST }}
+          # S008: Gate enabled/blocking config
+          TSC_ENABLED: ${{ env.HAWKY_GATE_TYPESCRIPT_ENABLED }}
+          TSC_BLOCKING: ${{ env.HAWKY_GATE_TYPESCRIPT_BLOCKING }}
+          BUILD_ENABLED: ${{ env.HAWKY_GATE_BUILD_ENABLED }}
+          BUILD_BLOCKING: ${{ env.HAWKY_GATE_BUILD_BLOCKING }}
+          TEST_ENABLED: ${{ env.HAWKY_GATE_TEST_ENABLED }}
+          TEST_BLOCKING: ${{ env.HAWKY_GATE_TEST_BLOCKING }}
+          ESLINT_ENABLED: ${{ env.HAWKY_GATE_ESLINT_ENABLED }}
+          ESLINT_BLOCKING: ${{ env.HAWKY_GATE_ESLINT_BLOCKING }}
+          # Gate outputs
           TSC_STATUS: ${{ steps.typecheck.outputs.tsc_status || 'unknown' }}
           TSC_ERRORS: ${{ steps.typecheck.outputs.tsc_errors || '0' }}
           TSC_TIME: ${{ steps.typecheck.outputs.tsc_time || 'N/A' }}
@@ -729,39 +900,60 @@ jobs:
           OVERALL_STATUS="passed"
           FAILED_GATES=""
           FAIL_FAST_SKIPPED=""
+          DISABLED_GATES=""
 
-          # Check each gate status
-          if [ "$TSC_STATUS" = "failed" ]; then
-            OVERALL_STATUS="failed"
-            FAILED_GATES="$FAILED_GATES TypeScript"
+          # S008: Check for disabled gates first
+          if [ "$TSC_ENABLED" = "false" ]; then
+            TSC_STATUS="disabled"
+            DISABLED_GATES="$DISABLED_GATES TypeScript"
+          elif [ "$TSC_STATUS" = "failed" ]; then
+            # Only count as blocking failure if gate is configured as blocking
+            if [ "$TSC_BLOCKING" != "false" ]; then
+              OVERALL_STATUS="failed"
+              FAILED_GATES="$FAILED_GATES TypeScript"
+            fi
           fi
 
-          # Detect fail-fast skipped gates (step didn't run AND fail-fast is enabled AND a prior gate failed)
-          # Build gate skipped due to fail-fast?
-          if [ "$BUILD_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && [ "$TSC_STATUS" = "failed" ]; then
+          # Build gate: check disabled, then fail-fast, then failure
+          if [ "$BUILD_ENABLED" = "false" ]; then
+            BUILD_STATUS="disabled"
+            DISABLED_GATES="$DISABLED_GATES Build"
+          elif [ "$BUILD_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && [ "$TSC_STATUS" = "failed" ] && [ "$TSC_BLOCKING" != "false" ]; then
             BUILD_STATUS="fail-fast"
             FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED Build"
           elif [ "$BUILD_STATUS" = "failed" ]; then
-            OVERALL_STATUS="failed"
-            FAILED_GATES="$FAILED_GATES Build"
+            if [ "$BUILD_BLOCKING" != "false" ]; then
+              OVERALL_STATUS="failed"
+              FAILED_GATES="$FAILED_GATES Build"
+            fi
           fi
 
-          # Test gate skipped due to fail-fast?
-          if [ "$TEST_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] || [ "$BUILD_STATUS" = "failed" ]); then
+          # Test gate: check disabled, then fail-fast, then failure
+          if [ "$TEST_ENABLED" = "false" ]; then
+            TEST_STATUS="disabled"
+            DISABLED_GATES="$DISABLED_GATES Test"
+          elif [ "$TEST_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && [ "$TSC_BLOCKING" != "false" ] || [ "$BUILD_STATUS" = "failed" ] && [ "$BUILD_BLOCKING" != "false" ]); then
             TEST_STATUS="fail-fast"
             FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED Test"
           elif [ "$TEST_STATUS" = "failed" ]; then
-            OVERALL_STATUS="failed"
-            FAILED_GATES="$FAILED_GATES Test"
+            if [ "$TEST_BLOCKING" != "false" ]; then
+              OVERALL_STATUS="failed"
+              FAILED_GATES="$FAILED_GATES Test"
+            fi
           fi
 
-          # ESLint gate skipped due to fail-fast?
-          if [ "$ESLINT_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] || [ "$BUILD_STATUS" = "failed" ] || [ "$TEST_STATUS" = "failed" ]); then
+          # ESLint gate: check disabled, then fail-fast, then failure
+          if [ "$ESLINT_ENABLED" = "false" ]; then
+            ESLINT_STATUS="disabled"
+            DISABLED_GATES="$DISABLED_GATES ESLint"
+          elif [ "$ESLINT_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && [ "$TSC_BLOCKING" != "false" ] || [ "$BUILD_STATUS" = "failed" ] && [ "$BUILD_BLOCKING" != "false" ] || [ "$TEST_STATUS" = "failed" ] && [ "$TEST_BLOCKING" != "false" ]); then
             ESLINT_STATUS="fail-fast"
             FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED ESLint"
           elif [ "$ESLINT_STATUS" = "failed" ]; then
-            OVERALL_STATUS="failed"
-            FAILED_GATES="$FAILED_GATES ESLint"
+            if [ "$ESLINT_BLOCKING" != "false" ]; then
+              OVERALL_STATUS="failed"
+              FAILED_GATES="$FAILED_GATES ESLint"
+            fi
           fi
 
           # Handle unknown statuses (step ran but produced no output - unusual)
@@ -787,6 +979,7 @@ jobs:
               failed) echo ":x:" ;;
               skipped) echo ":fast_forward:" ;;
               fail-fast) echo ":stop_sign:" ;;
+              disabled) echo ":no_entry_sign:" ;;
               *) echo ":grey_question:" ;;
             esac
           }
@@ -847,6 +1040,19 @@ jobs:
             echo "The following gates were skipped due to a prior blocking failure:$FAIL_FAST_SKIPPED" >> /tmp/hawky-comment.md
             echo "" >> /tmp/hawky-comment.md
             echo "_Fail-fast mode is enabled. Set \`HAWKY_FAIL_FAST: 'false'\` in workflow env to run all gates._" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "</details>" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+          fi
+
+          # S008: Add disabled gates info if any
+          if [ -n "$DISABLED_GATES" ]; then
+            echo "<details>" >> /tmp/hawky-comment.md
+            echo "<summary>:no_entry_sign: Disabled Gates</summary>" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "The following gates are disabled in \`.hawky.yml\`:$DISABLED_GATES" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "_To enable a gate, set \`enabled: true\` in the gate configuration._" >> /tmp/hawky-comment.md
             echo "" >> /tmp/hawky-comment.md
             echo "</details>" >> /tmp/hawky-comment.md
             echo "" >> /tmp/hawky-comment.md
