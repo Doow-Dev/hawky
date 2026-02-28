@@ -148,3 +148,54 @@ gates:
 # 3. After grace period ends, only NEW violations block
 # 4. Gradually fix baseline violations over time
 #    → Re-run baseline to update report and track progress
+
+# ==============================================================================
+# Hawkyignore File (S084)
+# ==============================================================================
+# Create a `.hawkyignore` file at your repo root to permanently suppress
+# specific violations. Useful for false positives or intentional exceptions.
+#
+# Syntax (similar to .gitignore):
+#
+# File patterns - ignore all rules in matching files:
+#   legacy/**                  # All files in legacy folder
+#   *.generated.ts             # All generated TypeScript files
+#   __tests__/fixtures/**      # Test fixtures
+#
+# Rule patterns - ignore specific rules everywhere:
+#   eslint:no-console          # Allow console.log throughout codebase
+#   typescript:TS2345          # Ignore specific TypeScript error
+#   semgrep:rule.id            # Ignore specific Semgrep rule
+#   gitleaks:generic-api-key   # Ignore specific secret type
+#
+# Combined patterns - rule + file scope:
+#   semgrep:javascript.lang.security.audit.*:test/**
+#   eslint:no-unused-vars:scripts/**
+#   gitleaks:*:test/fixtures/**
+#
+# Comments start with #
+#
+# Example .hawkyignore file:
+# ```
+# # Ignore console.log in development scripts
+# eslint:no-console:scripts/**
+#
+# # Test fixtures are intentionally insecure for testing
+# semgrep:*:test/fixtures/**
+# gitleaks:*:test/fixtures/**
+#
+# # Legacy code - will be refactored
+# legacy/**
+#
+# # Generated files
+# *.generated.ts
+# src/generated/**
+# ```
+#
+# Ignored violations:
+# - Don't appear as blocking errors
+# - Are shown in a collapsible "Ignored" section in reports
+# - Still tracked for visibility (you can see what's being ignored)
+#
+# Use .hawkyignore for permanent suppressions. For temporary tech debt,
+# use baseline mode instead.

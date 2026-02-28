@@ -1040,6 +1040,243 @@ Includes:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "</details>" >> $GITHUB_STEP_SUMMARY
 
+      # S084: Parse .hawkyignore file for suppressing violations
+      - name: Parse Hawkyignore
+        id: hawkyignore
+        run: |
+          IGNORE_FILE=".hawkyignore"
+
+          if [ ! -f "$IGNORE_FILE" ]; then
+            echo "No .hawkyignore found — all violations will be reported"
+            echo "hawkyignore_found=false" >> $GITHUB_OUTPUT
+            echo "hawkyignore_patterns=0" >> $GITHUB_OUTPUT
+            # Create empty patterns file
+            echo "[]" > /tmp/hawkyignore_patterns.json
+          else
+            echo "Found .hawkyignore file"
+            echo "hawkyignore_found=true" >> $GITHUB_OUTPUT
+
+            # Parse patterns using Node.js
+            # Supports:
+            # - File path patterns (gitignore-style): legacy/**, *.generated.ts
+            # - Rule patterns: eslint:no-console (applies to all files)
+            # - Combined patterns: semgrep:rule.id:path/pattern (rule + file pattern)
+            node -e "
+              const fs = require('fs');
+              const path = require('path');
+
+              const content = fs.readFileSync('$IGNORE_FILE', 'utf8');
+              const patterns = [];
+
+              content.split('\n').forEach((line, idx) => {
+                // Trim and skip empty lines and comments
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith('#')) return;
+
+                // Parse pattern format
+                // Format 1: path/pattern (file pattern, applies to all rules)
+                // Format 2: rule:pattern (rule pattern, applies to all files)
+                // Format 3: rule:rule.id:path/pattern (combined)
+
+                const parts = trimmed.split(':');
+
+                if (parts.length === 1) {
+                  // Just a file pattern
+                  patterns.push({
+                    type: 'file',
+                    filePattern: parts[0],
+                    rulePattern: null,
+                    line: idx + 1,
+                    raw: trimmed
+                  });
+                } else if (parts.length === 2) {
+                  // Could be rule:* (all files) or gate:rule
+                  // Check if first part is a known gate prefix
+                  const knownGates = ['eslint', 'typescript', 'semgrep', 'gitleaks', 'ts'];
+                  if (knownGates.includes(parts[0].toLowerCase())) {
+                    // gate:rule - applies to all files
+                    patterns.push({
+                      type: 'rule',
+                      filePattern: null,
+                      rulePattern: trimmed, // Keep full rule:id
+                      line: idx + 1,
+                      raw: trimmed
+                    });
+                  } else {
+                    // Treat as file pattern with colon in name (rare but possible)
+                    patterns.push({
+                      type: 'file',
+                      filePattern: trimmed,
+                      rulePattern: null,
+                      line: idx + 1,
+                      raw: trimmed
+                    });
+                  }
+                } else {
+                  // 3+ parts: rule:id:path pattern
+                  // e.g., semgrep:javascript.lang.security.audit.*:test/**
+                  const gate = parts[0];
+                  const ruleId = parts.slice(1, -1).join(':'); // Rule ID (may have colons)
+                  const filePattern = parts[parts.length - 1];
+                  patterns.push({
+                    type: 'combined',
+                    filePattern: filePattern,
+                    rulePattern: gate + ':' + ruleId,
+                    line: idx + 1,
+                    raw: trimmed
+                  });
+                }
+              });
+
+              // Write patterns for use by gates
+              fs.writeFileSync('/tmp/hawkyignore_patterns.json', JSON.stringify(patterns, null, 2));
+
+              // Output count
+              console.log('hawkyignore_patterns=' + patterns.length);
+
+              // Show summary
+              const filePatterns = patterns.filter(p => p.type === 'file').length;
+              const rulePatterns = patterns.filter(p => p.type === 'rule').length;
+              const combinedPatterns = patterns.filter(p => p.type === 'combined').length;
+
+              console.error('Loaded ' + patterns.length + ' pattern(s):');
+              if (filePatterns > 0) console.error('  - ' + filePatterns + ' file pattern(s)');
+              if (rulePatterns > 0) console.error('  - ' + rulePatterns + ' rule pattern(s)');
+              if (combinedPatterns > 0) console.error('  - ' + combinedPatterns + ' combined pattern(s)');
+            " >> $GITHUB_OUTPUT 2>&1
+
+            # Show in step summary
+            echo "## Hawkyignore" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            PATTERN_COUNT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/hawkyignore_patterns.json')).length)")
+            echo ":see_no_evil: **Loaded $PATTERN_COUNT pattern(s)** from \`.hawkyignore\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Matching violations will not appear in reports._" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Pattern details</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            cat "$IGNORE_FILE" | grep -v "^#" | grep -v "^$" >> $GITHUB_STEP_SUMMARY || echo "(empty)"
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Create hawkyignore check helper script
+          cat > /tmp/check_hawkyignore.js << 'HAWKYIGNORE_SCRIPT'
+          const fs = require('fs');
+          const path = require('path');
+
+          // Load patterns
+          let patterns = [];
+          try {
+            patterns = JSON.parse(fs.readFileSync('/tmp/hawkyignore_patterns.json', 'utf8'));
+          } catch (e) {
+            patterns = [];
+          }
+
+          // Convert gitignore-style pattern to regex
+          function patternToRegex(pattern) {
+            if (!pattern) return null;
+
+            // Escape special regex chars except * and ?
+            let regex = pattern
+              .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+              .replace(/\*\*/g, '{{GLOBSTAR}}')
+              .replace(/\*/g, '[^/]*')
+              .replace(/\?/g, '[^/]')
+              .replace(/\{\{GLOBSTAR\}\}/g, '.*');
+
+            // If pattern doesn't start with /, match anywhere in path
+            if (!pattern.startsWith('/')) {
+              regex = '(^|/)' + regex;
+            } else {
+              regex = '^' + regex.substring(1); // Remove leading /
+            }
+
+            // If pattern ends with /, match directory contents
+            if (pattern.endsWith('/')) {
+              regex = regex + '.*';
+            }
+
+            return new RegExp(regex + '$', 'i');
+          }
+
+          // Check if a rule matches a rule pattern (supports wildcards)
+          function matchesRulePattern(rule, rulePattern) {
+            if (!rulePattern) return false;
+
+            // Exact match
+            if (rule === rulePattern) return true;
+            if (rule.toLowerCase() === rulePattern.toLowerCase()) return true;
+
+            // Wildcard match (e.g., eslint:* matches eslint:no-console)
+            const ruleRegex = patternToRegex(rulePattern);
+            return ruleRegex && ruleRegex.test(rule);
+          }
+
+          // Check if file path matches a file pattern
+          function matchesFilePattern(filePath, filePattern) {
+            if (!filePattern) return false;
+
+            // Normalize path separators
+            const normalizedPath = filePath.replace(/\\/g, '/');
+            const regex = patternToRegex(filePattern);
+            return regex && regex.test(normalizedPath);
+          }
+
+          // Main check function: returns true if violation should be ignored
+          function shouldIgnore(rule, filePath) {
+            for (const pattern of patterns) {
+              switch (pattern.type) {
+                case 'file':
+                  // File pattern only - matches any rule in matching files
+                  if (matchesFilePattern(filePath, pattern.filePattern)) {
+                    return { ignored: true, reason: pattern.raw, line: pattern.line };
+                  }
+                  break;
+
+                case 'rule':
+                  // Rule pattern only - matches this rule in any file
+                  if (matchesRulePattern(rule, pattern.rulePattern)) {
+                    return { ignored: true, reason: pattern.raw, line: pattern.line };
+                  }
+                  break;
+
+                case 'combined':
+                  // Both rule and file must match
+                  if (matchesRulePattern(rule, pattern.rulePattern) &&
+                      matchesFilePattern(filePath, pattern.filePattern)) {
+                    return { ignored: true, reason: pattern.raw, line: pattern.line };
+                  }
+                  break;
+              }
+            }
+            return { ignored: false };
+          }
+
+          // Export for use as module
+          module.exports = { shouldIgnore, patterns };
+
+          // CLI mode: check_hawkyignore.js <rule> <file>
+          if (require.main === module) {
+            const [,, rule, file] = process.argv;
+            if (rule && file) {
+              const result = shouldIgnore(rule, file);
+              if (result.ignored) {
+                console.log('ignored:' + result.reason);
+                process.exit(0); // Exit 0 = ignored
+              } else {
+                console.log('active');
+                process.exit(1); // Exit 1 = not ignored (violation active)
+              }
+            } else {
+              console.error('Usage: check_hawkyignore.js <rule> <file>');
+              process.exit(2);
+            }
+          }
+          HAWKYIGNORE_SCRIPT
+
       # S081: Load baseline for comparison
       - name: Load Baseline
         id: baseline
@@ -1218,12 +1455,15 @@ Includes:
           fi
 
           # S081: Parse errors and classify as new vs existing (baseline)
+          # S084: Also filter through hawkyignore patterns
           NEW_ERRORS=0
           EXISTING_ERRORS=0
+          IGNORED_ERRORS=0
           NEW_ERROR_LIST=""
           EXISTING_ERROR_LIST=""
+          IGNORED_ERROR_LIST=""
 
-          # Process each error with baseline check
+          # Process each error with hawkyignore and baseline checks
           while IFS= read -r line; do
             # Match TypeScript error format: file(line,col): error TSxxxx: message
             if [[ "$line" =~ ^([^(]+)\(([0-9]+),([0-9]+)\):\ error\ (TS[0-9]+):\ (.*)$ ]]; then
@@ -1232,6 +1472,14 @@ Includes:
               COL="${BASH_REMATCH[3]}"
               CODE="${BASH_REMATCH[4]}"
               MSG="${BASH_REMATCH[5]}"
+
+              # S084: Check if this error should be ignored per .hawkyignore
+              IGNORE_RESULT=$(node /tmp/check_hawkyignore.js "typescript:$CODE" "$FILE" 2>/dev/null || echo "active")
+              if [[ "$IGNORE_RESULT" == ignored:* ]]; then
+                IGNORED_ERRORS=$((IGNORED_ERRORS + 1))
+                IGNORED_ERROR_LIST="$IGNORED_ERROR_LIST\n$FILE($LINE_NUM,$COL): $CODE: $MSG"
+                continue
+              fi
 
               # Check if this error is in the baseline
               IN_BASELINE=$(node /tmp/check_baseline.js "$CODE" "$FILE" "$LINE_NUM" 2>/dev/null && echo "yes" || echo "no")
@@ -1250,12 +1498,16 @@ Includes:
 
           echo "tsc_new_errors=$NEW_ERRORS" >> $GITHUB_OUTPUT
           echo "tsc_existing_errors=$EXISTING_ERRORS" >> $GITHUB_OUTPUT
+          echo "tsc_ignored_errors=$IGNORED_ERRORS" >> $GITHUB_OUTPUT
 
-          # Report based on new vs existing
+          # Report based on new vs existing vs ignored
           if [ "$NEW_ERRORS" -gt 0 ]; then
             echo ":x: **Failed** — $NEW_ERRORS NEW type error(s)" >> $GITHUB_STEP_SUMMARY
             if [ "$EXISTING_ERRORS" -gt 0 ]; then
               echo ":white_circle: **Existing** — $EXISTING_ERRORS error(s) in baseline" >> $GITHUB_STEP_SUMMARY
+            fi
+            if [ "$IGNORED_ERRORS" -gt 0 ]; then
+              echo ":see_no_evil: **Ignored** — $IGNORED_ERRORS error(s) per .hawkyignore" >> $GITHUB_STEP_SUMMARY
             fi
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### New Errors (blocking)" >> $GITHUB_STEP_SUMMARY
@@ -1275,14 +1527,28 @@ Includes:
               echo "</details>" >> $GITHUB_STEP_SUMMARY
             fi
 
+            if [ "$IGNORED_ERRORS" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Ignored Errors (per .hawkyignore)</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo -e "$IGNORED_ERROR_LIST" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+
             echo ""
-            echo "TypeScript check failed with $NEW_ERRORS NEW error(s) ($EXISTING_ERRORS existing)"
+            echo "TypeScript check failed with $NEW_ERRORS NEW error(s) ($EXISTING_ERRORS existing, $IGNORED_ERRORS ignored)"
             echo "tsc_status=failed" >> $GITHUB_OUTPUT
             exit 1
           elif [ "$EXISTING_ERRORS" -gt 0 ]; then
             # Only existing errors - pass (baseline mode)
             echo ":white_check_mark: **Passed** — No NEW type errors" >> $GITHUB_STEP_SUMMARY
             echo ":white_circle: **Existing** — $EXISTING_ERRORS error(s) in baseline (not blocking)" >> $GITHUB_STEP_SUMMARY
+            if [ "$IGNORED_ERRORS" -gt 0 ]; then
+              echo ":see_no_evil: **Ignored** — $IGNORED_ERRORS error(s) per .hawkyignore" >> $GITHUB_STEP_SUMMARY
+            fi
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "<details>" >> $GITHUB_STEP_SUMMARY
             echo "<summary>Existing Errors (in baseline)</summary>" >> $GITHUB_STEP_SUMMARY
@@ -1291,10 +1557,38 @@ Includes:
             echo -e "$EXISTING_ERROR_LIST" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$IGNORED_ERRORS" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Ignored Errors (per .hawkyignore)</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo -e "$IGNORED_ERROR_LIST" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "_Run \`hawky baseline --update\` to refresh the baseline after fixing issues._" >> $GITHUB_STEP_SUMMARY
 
-            echo "TypeScript check passed — $EXISTING_ERRORS existing error(s) in baseline"
+            echo "TypeScript check passed — $EXISTING_ERRORS existing error(s) in baseline, $IGNORED_ERRORS ignored"
+            echo "tsc_status=passed" >> $GITHUB_OUTPUT
+            exit 0
+          elif [ "$IGNORED_ERRORS" -gt 0 ]; then
+            # Only ignored errors - pass
+            echo ":white_check_mark: **Passed** — No active type errors" >> $GITHUB_STEP_SUMMARY
+            echo ":see_no_evil: **Ignored** — $IGNORED_ERRORS error(s) per .hawkyignore" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Ignored Errors (per .hawkyignore)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo -e "$IGNORED_ERROR_LIST" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+            echo "TypeScript check passed — $IGNORED_ERRORS error(s) ignored per .hawkyignore"
             echo "tsc_status=passed" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -1711,22 +2005,26 @@ Includes:
           # Output lint time for summary
           echo "eslint_time=${ESLINT_TIME}s" >> $GITHUB_OUTPUT
 
-          # Parse JSON output with S081 baseline comparison
+          # Parse JSON output with S081 baseline comparison and S084 hawkyignore filtering
           # ESLint JSON format: [{ filePath, messages: [{ ruleId, severity, message, line, column }], errorCount, warningCount }]
           ERROR_COUNT=0
           WARNING_COUNT=0
           NEW_ERRORS=0
           EXISTING_ERRORS=0
+          IGNORED_ERRORS=0
 
           # Check if output is valid JSON
           if echo "$ESLINT_OUTPUT" | node -e "JSON.parse(require('fs').readFileSync(0, 'utf8'))" 2>/dev/null; then
-            # S081: Parse with baseline check using Node.js
+            # S081 + S084: Parse with baseline check and hawkyignore filtering
             PARSED=$(echo "$ESLINT_OUTPUT" | node -e "
               const crypto = require('crypto');
               const fs = require('fs');
 
               // Load baseline hashes
               const baselineHashes = new Set(JSON.parse(fs.readFileSync('/tmp/baseline_hashes.json', 'utf8')));
+
+              // S084: Load hawkyignore helper
+              const { shouldIgnore } = require('/tmp/check_hawkyignore.js');
 
               // Compute hash for violation
               function computeHash(ruleId, filePath, lineNum) {
@@ -1748,9 +2046,10 @@ Includes:
               }
 
               const data = JSON.parse(fs.readFileSync(0, 'utf8'));
-              let totalErrors = 0, warnings = 0, newErrors = 0, existingErrors = 0;
+              let totalErrors = 0, warnings = 0, newErrors = 0, existingErrors = 0, ignoredErrors = 0;
               const newAnnotations = [];
               const existingAnnotations = [];
+              const ignoredAnnotations = [];
 
               data.forEach(file => {
                 totalErrors += file.errorCount || 0;
@@ -1761,6 +2060,14 @@ Includes:
                   const col = msg.column || 1;
                   const rule = msg.ruleId || 'unknown';
                   const message = (msg.message || '').replace(/'/g, \"'\");
+
+                  // S084: Check hawkyignore first
+                  const ignoreResult = shouldIgnore('eslint:' + rule, file.filePath);
+                  if (ignoreResult.ignored) {
+                    ignoredErrors++;
+                    ignoredAnnotations.push({ severity: msg.severity === 2 ? 'error' : 'warning', file: file.filePath, line, col, rule, message, reason: ignoreResult.reason });
+                    return; // Skip this violation
+                  }
 
                   if (msg.severity === 2) {
                     const hash = computeHash(rule, file.filePath, line);
@@ -1787,8 +2094,10 @@ Includes:
                 warnings,
                 newErrors,
                 existingErrors,
+                ignoredErrors,
                 newAnnotations,
-                existingAnnotations
+                existingAnnotations,
+                ignoredAnnotations
               }));
             ")
 
@@ -1796,6 +2105,7 @@ Includes:
             WARNING_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).warnings)")
             NEW_ERRORS=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).newErrors)")
             EXISTING_ERRORS=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).existingErrors)")
+            IGNORED_ERRORS=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).ignoredErrors)")
 
             # Emit GitHub annotations only for NEW errors (blocking)
             echo "$PARSED" | node -e "
@@ -1820,16 +2130,20 @@ Includes:
             echo "eslint_warnings=0" >> $GITHUB_OUTPUT
             echo "eslint_new_errors=0" >> $GITHUB_OUTPUT
             echo "eslint_existing_errors=0" >> $GITHUB_OUTPUT
+            echo "eslint_ignored_errors=0" >> $GITHUB_OUTPUT
             exit 1
           fi
 
-          # Summary table with baseline info
+          # Summary table with baseline and ignored info
           echo "### Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Type | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| New Errors | $NEW_ERRORS |" >> $GITHUB_STEP_SUMMARY
           echo "| Existing Errors (baseline) | $EXISTING_ERRORS |" >> $GITHUB_STEP_SUMMARY
+          if [ "$IGNORED_ERRORS" -gt 0 ]; then
+            echo "| Ignored (per .hawkyignore) | $IGNORED_ERRORS |" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "| Warnings | $WARNING_COUNT |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
@@ -1838,12 +2152,16 @@ Includes:
           echo "eslint_warnings=$WARNING_COUNT" >> $GITHUB_OUTPUT
           echo "eslint_new_errors=$NEW_ERRORS" >> $GITHUB_OUTPUT
           echo "eslint_existing_errors=$EXISTING_ERRORS" >> $GITHUB_OUTPUT
+          echo "eslint_ignored_errors=$IGNORED_ERRORS" >> $GITHUB_OUTPUT
 
           # Handle results - only NEW errors block merge
           if [ "$NEW_ERRORS" -gt 0 ]; then
             echo ":x: **Failed** — $NEW_ERRORS NEW error(s)" >> $GITHUB_STEP_SUMMARY
             if [ "$EXISTING_ERRORS" -gt 0 ]; then
               echo ":white_circle: **Existing** — $EXISTING_ERRORS error(s) in baseline" >> $GITHUB_STEP_SUMMARY
+            fi
+            if [ "$IGNORED_ERRORS" -gt 0 ]; then
+              echo ":see_no_evil: **Ignored** — $IGNORED_ERRORS error(s) per .hawkyignore" >> $GITHUB_STEP_SUMMARY
             fi
             echo "eslint_status=failed" >> $GITHUB_OUTPUT
 
@@ -1891,8 +2209,32 @@ Includes:
               echo "</details>" >> $GITHUB_STEP_SUMMARY
             fi
 
+            # S084: Show ignored errors in collapsible section
+            if [ "$IGNORED_ERRORS" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Ignored Errors (per .hawkyignore)</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "$PARSED" | node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                const byFile = {};
+                data.ignoredAnnotations.forEach(a => {
+                  if (!byFile[a.file]) byFile[a.file] = [];
+                  byFile[a.file].push(a);
+                });
+                Object.entries(byFile).forEach(([file, errors]) => {
+                  console.log('**' + file + '** (' + errors.length + ' error(s))');
+                  errors.forEach(e => {
+                    console.log('- Line ' + e.line + ':' + e.col + ' — ' + e.message + ' (\\\`' + e.rule + '\\\`) — _' + e.reason + '_');
+                  });
+                  console.log('');
+                });
+              " >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+
             echo ""
-            echo "ESLint failed: $NEW_ERRORS NEW error(s), $EXISTING_ERRORS existing, $WARNING_COUNT warning(s)"
+            echo "ESLint failed: $NEW_ERRORS NEW error(s), $EXISTING_ERRORS existing, $IGNORED_ERRORS ignored, $WARNING_COUNT warning(s)"
             exit 1
           fi
 
@@ -1900,6 +2242,9 @@ Includes:
           if [ "$EXISTING_ERRORS" -gt 0 ]; then
             echo ":white_check_mark: **Passed** — No NEW errors" >> $GITHUB_STEP_SUMMARY
             echo ":white_circle: **Existing** — $EXISTING_ERRORS error(s) in baseline (not blocking)" >> $GITHUB_STEP_SUMMARY
+            if [ "$IGNORED_ERRORS" -gt 0 ]; then
+              echo ":see_no_evil: **Ignored** — $IGNORED_ERRORS error(s) per .hawkyignore" >> $GITHUB_STEP_SUMMARY
+            fi
             echo "eslint_status=passed" >> $GITHUB_OUTPUT
 
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -1922,10 +2267,35 @@ Includes:
               });
             " >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+            # S084: Show ignored errors in collapsible section
+            if [ "$IGNORED_ERRORS" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Ignored Errors (per .hawkyignore)</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "$PARSED" | node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                const byFile = {};
+                data.ignoredAnnotations.forEach(a => {
+                  if (!byFile[a.file]) byFile[a.file] = [];
+                  byFile[a.file].push(a);
+                });
+                Object.entries(byFile).forEach(([file, errors]) => {
+                  console.log('**' + file + '** (' + errors.length + ' error(s))');
+                  errors.forEach(e => {
+                    console.log('- Line ' + e.line + ':' + e.col + ' — ' + e.message + ' (\\\`' + e.rule + '\\\`) — _' + e.reason + '_');
+                  });
+                  console.log('');
+                });
+              " >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "_Run \`hawky baseline --update\` to refresh the baseline after fixing issues._" >> $GITHUB_STEP_SUMMARY
 
-            echo "ESLint passed — $EXISTING_ERRORS existing error(s) in baseline"
+            echo "ESLint passed — $EXISTING_ERRORS existing error(s) in baseline, $IGNORED_ERRORS ignored"
           elif [ "$WARNING_COUNT" -gt 0 ]; then
             echo ":white_check_mark: **Passed** — $WARNING_COUNT warning(s) (non-blocking)" >> $GITHUB_STEP_SUMMARY
             echo "::warning::ESLint completed with $WARNING_COUNT warning(s)"
@@ -2069,7 +2439,7 @@ Includes:
           # Output scan time for summary
           echo "semgrep_time=${SEMGREP_TIME}s" >> $GITHUB_OUTPUT
 
-          # Parse JSON output with S081 baseline comparison
+          # Parse JSON output with S081 baseline comparison and S084 hawkyignore filtering
           # Semgrep JSON format: { results: [{ check_id, path, start: {line, col}, extra: {severity, message} }], errors: [] }
           HIGH_COUNT=0
           MEDIUM_COUNT=0
@@ -2077,16 +2447,20 @@ Includes:
           INFO_COUNT=0
           NEW_HIGH=0
           EXISTING_HIGH=0
+          IGNORED_HIGH=0
 
           # Check if output is valid JSON
           if echo "$SEMGREP_OUTPUT" | node -e "JSON.parse(require('fs').readFileSync(0, 'utf8'))" 2>/dev/null; then
-            # S081: Parse with baseline check using Node.js
+            # S081 + S084: Parse with baseline check and hawkyignore filtering
             PARSED=$(echo "$SEMGREP_OUTPUT" | node -e "
               const crypto = require('crypto');
               const fs = require('fs');
 
               // Load baseline hashes
               const baselineHashes = new Set(JSON.parse(fs.readFileSync('/tmp/baseline_hashes.json', 'utf8')));
+
+              // S084: Load hawkyignore helper
+              const { shouldIgnore } = require('/tmp/check_hawkyignore.js');
 
               // Compute hash for violation
               function computeHash(ruleId, filePath, lineNum) {
@@ -2109,9 +2483,10 @@ Includes:
 
               const data = JSON.parse(fs.readFileSync(0, 'utf8'));
               let high = 0, medium = 0, low = 0, info = 0;
-              let newHigh = 0, existingHigh = 0;
+              let newHigh = 0, existingHigh = 0, ignoredHigh = 0;
               const newAnnotations = [];
               const existingAnnotations = [];
+              const ignoredAnnotations = [];
 
               (data.results || []).forEach(result => {
                 const severity = (result.extra?.severity || 'INFO').toUpperCase();
@@ -2120,6 +2495,14 @@ Includes:
                 const col = result.start?.col || 1;
                 const ruleId = result.check_id || 'unknown';
                 const message = (result.extra?.message || 'Security finding').replace(/'/g, \"'\").replace(/\n/g, ' ');
+
+                // S084: Check hawkyignore first
+                const ignoreResult = shouldIgnore('semgrep:' + ruleId, file);
+                if (ignoreResult.ignored) {
+                  if (severity === 'ERROR' || severity === 'HIGH') ignoredHigh++;
+                  ignoredAnnotations.push({ severity: 'ignored', file, line, col, ruleId, message, originalSeverity: severity, reason: ignoreResult.reason });
+                  return; // Skip this finding
+                }
 
                 // Count by severity
                 if (severity === 'ERROR' || severity === 'HIGH') high++;
@@ -2147,7 +2530,7 @@ Includes:
                 }
               });
 
-              console.log(JSON.stringify({ high, medium, low, info, newHigh, existingHigh, newAnnotations, existingAnnotations }));
+              console.log(JSON.stringify({ high, medium, low, info, newHigh, existingHigh, ignoredHigh, newAnnotations, existingAnnotations, ignoredAnnotations }));
             ")
 
             HIGH_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).high)")
@@ -2156,6 +2539,7 @@ Includes:
             INFO_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).info)")
             NEW_HIGH=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).newHigh)")
             EXISTING_HIGH=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).existingHigh)")
+            IGNORED_HIGH=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).ignoredHigh)")
 
             # Emit GitHub annotations only for NEW high-severity findings
             echo "$PARSED" | node -e "
@@ -2181,17 +2565,24 @@ Includes:
             echo "semgrep_low=0" >> $GITHUB_OUTPUT
             echo "semgrep_new_high=0" >> $GITHUB_OUTPUT
             echo "semgrep_existing_high=0" >> $GITHUB_OUTPUT
+            echo "semgrep_ignored_high=0" >> $GITHUB_OUTPUT
             exit 1
           fi
 
           TOTAL_FINDINGS=$((HIGH_COUNT + MEDIUM_COUNT + LOW_COUNT + INFO_COUNT))
 
-          # Summary table with baseline info
+          # Summary table with baseline and ignored info
           echo "### Security Findings" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Severity | New | Existing | Total |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-----|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| :red_circle: High/Error | $NEW_HIGH | $EXISTING_HIGH | $HIGH_COUNT |" >> $GITHUB_STEP_SUMMARY
+          if [ "$IGNORED_HIGH" -gt 0 ]; then
+            echo "| Severity | New | Existing | Ignored | Total |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-----|----------|---------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| :red_circle: High/Error | $NEW_HIGH | $EXISTING_HIGH | $IGNORED_HIGH | $HIGH_COUNT |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Severity | New | Existing | Total |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-----|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| :red_circle: High/Error | $NEW_HIGH | $EXISTING_HIGH | $HIGH_COUNT |" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "| :orange_circle: Medium/Warning | - | - | $MEDIUM_COUNT |" >> $GITHUB_STEP_SUMMARY
           echo "| :yellow_circle: Low | - | - | $LOW_COUNT |" >> $GITHUB_STEP_SUMMARY
           echo "| :white_circle: Info | - | - | $INFO_COUNT |" >> $GITHUB_STEP_SUMMARY
@@ -2204,12 +2595,16 @@ Includes:
           echo "semgrep_info=$INFO_COUNT" >> $GITHUB_OUTPUT
           echo "semgrep_new_high=$NEW_HIGH" >> $GITHUB_OUTPUT
           echo "semgrep_existing_high=$EXISTING_HIGH" >> $GITHUB_OUTPUT
+          echo "semgrep_ignored_high=$IGNORED_HIGH" >> $GITHUB_OUTPUT
 
           # Handle results - only NEW high severity findings block merge
           if [ "$NEW_HIGH" -gt 0 ]; then
             echo ":x: **Failed** — $NEW_HIGH NEW high-severity finding(s)" >> $GITHUB_STEP_SUMMARY
             if [ "$EXISTING_HIGH" -gt 0 ]; then
               echo ":white_circle: **Existing** — $EXISTING_HIGH high-severity finding(s) in baseline" >> $GITHUB_STEP_SUMMARY
+            fi
+            if [ "$IGNORED_HIGH" -gt 0 ]; then
+              echo ":see_no_evil: **Ignored** — $IGNORED_HIGH high-severity finding(s) per .hawkyignore" >> $GITHUB_STEP_SUMMARY
             fi
             echo "semgrep_status=failed" >> $GITHUB_OUTPUT
 
@@ -2243,8 +2638,25 @@ Includes:
               echo "</details>" >> $GITHUB_STEP_SUMMARY
             fi
 
+            # S084: Show ignored findings in collapsible
+            if [ "$IGNORED_HIGH" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Ignored High-Severity Findings (per .hawkyignore)</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "$PARSED" | node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                data.ignoredAnnotations.filter(a => a.originalSeverity === 'HIGH' || a.originalSeverity === 'ERROR').forEach(a => {
+                  console.log('**' + a.file + ':' + a.line + '** — ' + a.ruleId + ' — _' + a.reason + '_');
+                  console.log('  ' + a.message.substring(0, 200));
+                  console.log('');
+                });
+              " >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+
             echo ""
-            echo "Semgrep failed: $NEW_HIGH NEW high-severity finding(s), $EXISTING_HIGH existing"
+            echo "Semgrep failed: $NEW_HIGH NEW high-severity finding(s), $EXISTING_HIGH existing, $IGNORED_HIGH ignored"
             exit 1
           fi
 
@@ -2252,6 +2664,9 @@ Includes:
           if [ "$EXISTING_HIGH" -gt 0 ]; then
             echo ":white_check_mark: **Passed** — No NEW high-severity findings" >> $GITHUB_STEP_SUMMARY
             echo ":white_circle: **Existing** — $EXISTING_HIGH high-severity finding(s) in baseline (not blocking)" >> $GITHUB_STEP_SUMMARY
+            if [ "$IGNORED_HIGH" -gt 0 ]; then
+              echo ":see_no_evil: **Ignored** — $IGNORED_HIGH high-severity finding(s) per .hawkyignore" >> $GITHUB_STEP_SUMMARY
+            fi
             echo "semgrep_status=passed" >> $GITHUB_OUTPUT
 
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -2267,10 +2682,28 @@ Includes:
               });
             " >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+            # S084: Show ignored findings in collapsible
+            if [ "$IGNORED_HIGH" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Ignored High-Severity Findings (per .hawkyignore)</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "$PARSED" | node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                data.ignoredAnnotations.filter(a => a.originalSeverity === 'HIGH' || a.originalSeverity === 'ERROR').forEach(a => {
+                  console.log('**' + a.file + ':' + a.line + '** — ' + a.ruleId + ' — _' + a.reason + '_');
+                  console.log('  ' + a.message.substring(0, 200));
+                  console.log('');
+                });
+              " >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "_Run \`hawky baseline --update\` to refresh the baseline after fixing issues._" >> $GITHUB_STEP_SUMMARY
 
-            echo "Semgrep passed — $EXISTING_HIGH existing high-severity finding(s) in baseline"
+            echo "Semgrep passed — $EXISTING_HIGH existing high-severity finding(s) in baseline, $IGNORED_HIGH ignored"
           elif [ "$MEDIUM_COUNT" -gt 0 ]; then
             echo ":white_check_mark: **Passed** — $MEDIUM_COUNT medium-severity finding(s) (warnings)" >> $GITHUB_STEP_SUMMARY
             echo "::warning::Semgrep found $MEDIUM_COUNT medium-severity finding(s)"
@@ -2418,17 +2851,23 @@ Includes:
           # Output scan time for summary
           echo "gitleaks_time=${GITLEAKS_TIME}s" >> $GITHUB_OUTPUT
 
-          # Parse JSON output
+          # Parse JSON output with S084 hawkyignore filtering
           SECRET_COUNT=0
+          IGNORED_SECRETS=0
 
           # Check if report file exists and is valid JSON
           if [ -f /tmp/gitleaks-report.json ]; then
             if node -e "JSON.parse(require('fs').readFileSync('/tmp/gitleaks-report.json', 'utf8'))" 2>/dev/null; then
-              # Parse with Node.js for reliable JSON handling
+              # Parse with Node.js for reliable JSON handling + S084 hawkyignore
               PARSED=$(node -e "
-                const data = JSON.parse(require('fs').readFileSync('/tmp/gitleaks-report.json', 'utf8'));
+                const fs = require('fs');
+                const data = JSON.parse(fs.readFileSync('/tmp/gitleaks-report.json', 'utf8'));
                 const findings = Array.isArray(data) ? data : [];
                 const annotations = [];
+                const ignoredAnnotations = [];
+
+                // S084: Load hawkyignore helper
+                const { shouldIgnore } = require('/tmp/check_hawkyignore.js');
 
                 // Filter out test fixtures, mocks, and examples
                 const filteredFindings = findings.filter(f => {
@@ -2447,6 +2886,19 @@ Includes:
                   const description = finding.Description || 'Potential secret detected';
                   const secret = finding.Secret ? finding.Secret.substring(0, 20) + '...' : 'redacted';
 
+                  // S084: Check hawkyignore
+                  const ignoreResult = shouldIgnore('gitleaks:' + rule, file);
+                  if (ignoreResult.ignored) {
+                    ignoredAnnotations.push({
+                      file,
+                      line,
+                      rule,
+                      description,
+                      reason: ignoreResult.reason
+                    });
+                    return;
+                  }
+
                   annotations.push({
                     file,
                     line,
@@ -2456,10 +2908,11 @@ Includes:
                   });
                 });
 
-                console.log(JSON.stringify({ count: filteredFindings.length, annotations }));
+                console.log(JSON.stringify({ count: annotations.length, ignoredCount: ignoredAnnotations.length, annotations, ignoredAnnotations }));
               ")
 
               SECRET_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).count)")
+              IGNORED_SECRETS=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).ignoredCount)")
 
               # Emit GitHub annotations
               echo "$PARSED" | node -e "
@@ -2476,12 +2929,13 @@ Includes:
 
           # If gitleaks exit code indicates findings (exit 1) but we filtered them all, reset
           if [ "$GITLEAKS_EXIT_CODE" -eq 1 ] && [ "$SECRET_COUNT" -eq 0 ]; then
-            echo "All findings were in test fixtures — treating as passed"
+            echo "All findings were in test fixtures or ignored — treating as passed"
             GITLEAKS_EXIT_CODE=0
           fi
 
-          # Store count for future gates
+          # Store counts for future gates
           echo "gitleaks_secrets=$SECRET_COUNT" >> $GITHUB_OUTPUT
+          echo "gitleaks_ignored=$IGNORED_SECRETS" >> $GITHUB_OUTPUT
 
           # Handle results - any secrets block merge
           if [ "$SECRET_COUNT" -gt 0 ]; then
@@ -2499,13 +2953,56 @@ Includes:
 
             echo "" >> $GITHUB_STEP_SUMMARY
             echo ":x: **Failed** — $SECRET_COUNT secret(s) detected" >> $GITHUB_STEP_SUMMARY
+            if [ "$IGNORED_SECRETS" -gt 0 ]; then
+              echo ":see_no_evil: **Ignored** — $IGNORED_SECRETS secret(s) per .hawkyignore" >> $GITHUB_STEP_SUMMARY
+            fi
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "_To suppress false positives, add entries to \`.gitleaksignore\`._" >> $GITHUB_STEP_SUMMARY
+            echo "_To suppress false positives, add entries to \`.gitleaksignore\` or \`.hawkyignore\`._" >> $GITHUB_STEP_SUMMARY
+
+            # S084: Show ignored findings if any
+            if [ "$IGNORED_SECRETS" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Ignored Secrets (per .hawkyignore)</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| File | Line | Rule | Reason |" >> $GITHUB_STEP_SUMMARY
+              echo "|------|------|------|--------|" >> $GITHUB_STEP_SUMMARY
+              echo "$PARSED" | node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                data.ignoredAnnotations.forEach(a => {
+                  console.log('| \`' + a.file + '\` | ' + a.line + ' | \`' + a.rule + '\` | _' + a.reason + '_ |');
+                });
+              " >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+
             echo "gitleaks_status=failed" >> $GITHUB_OUTPUT
 
             echo ""
-            echo "Gitleaks failed: $SECRET_COUNT secret(s) detected"
+            echo "Gitleaks failed: $SECRET_COUNT secret(s) detected, $IGNORED_SECRETS ignored"
             exit 1
+          fi
+
+          # Check if only ignored secrets
+          if [ "$IGNORED_SECRETS" -gt 0 ]; then
+            echo ":white_check_mark: **Passed** — No active secrets detected" >> $GITHUB_STEP_SUMMARY
+            echo ":see_no_evil: **Ignored** — $IGNORED_SECRETS secret(s) per .hawkyignore" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Ignored Secrets (per .hawkyignore)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| File | Line | Rule | Reason |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|------|------|--------|" >> $GITHUB_STEP_SUMMARY
+            echo "$PARSED" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              data.ignoredAnnotations.forEach(a => {
+                console.log('| \`' + a.file + '\` | ' + a.line + ' | \`' + a.rule + '\` | _' + a.reason + '_ |');
+              });
+            " >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            echo "Gitleaks passed — $IGNORED_SECRETS secret(s) ignored per .hawkyignore"
+            echo "gitleaks_status=passed" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
           echo ":white_check_mark: **Passed** — No secrets detected" >> $GITHUB_STEP_SUMMARY
@@ -2530,6 +3027,9 @@ Includes:
           # S082: Grace period mode
           GRACE_PERIOD_ACTIVE: ${{ env.HAWKY_GRACE_PERIOD_ACTIVE }}
           GRACE_PERIOD_END_DATE: ${{ env.HAWKY_GRACE_PERIOD_END_DATE }}
+          # S084: Hawkyignore info
+          HAWKYIGNORE_FOUND: ${{ steps.hawkyignore.outputs.hawkyignore_found || 'false' }}
+          HAWKYIGNORE_PATTERNS: ${{ steps.hawkyignore.outputs.hawkyignore_patterns || '0' }}
           # S008: Gate enabled/blocking config
           TSC_ENABLED: ${{ env.HAWKY_GATE_TYPESCRIPT_ENABLED }}
           TSC_BLOCKING: ${{ env.HAWKY_GATE_TYPESCRIPT_BLOCKING }}
@@ -2547,6 +3047,7 @@ Includes:
           TSC_ERRORS: ${{ steps.typecheck.outputs.tsc_errors || '0' }}
           TSC_NEW_ERRORS: ${{ steps.typecheck.outputs.tsc_new_errors || '0' }}
           TSC_EXISTING_ERRORS: ${{ steps.typecheck.outputs.tsc_existing_errors || '0' }}
+          TSC_IGNORED_ERRORS: ${{ steps.typecheck.outputs.tsc_ignored_errors || '0' }}
           TSC_TIME: ${{ steps.typecheck.outputs.tsc_time || 'N/A' }}
           BUILD_STATUS: ${{ steps.build.outputs.build_status || 'unknown' }}
           BUILD_WARNINGS: ${{ steps.build.outputs.build_warnings || '0' }}
@@ -2563,6 +3064,7 @@ Includes:
           ESLINT_ERRORS: ${{ steps.eslint.outputs.eslint_errors || '0' }}
           ESLINT_NEW_ERRORS: ${{ steps.eslint.outputs.eslint_new_errors || '0' }}
           ESLINT_EXISTING_ERRORS: ${{ steps.eslint.outputs.eslint_existing_errors || '0' }}
+          ESLINT_IGNORED_ERRORS: ${{ steps.eslint.outputs.eslint_ignored_errors || '0' }}
           ESLINT_WARNINGS: ${{ steps.eslint.outputs.eslint_warnings || '0' }}
           ESLINT_TIME: ${{ steps.eslint.outputs.eslint_time || 'N/A' }}
           ESLINT_STEP_RAN: ${{ steps.eslint.outcome != 'skipped' }}
@@ -2571,6 +3073,7 @@ Includes:
           SEMGREP_HIGH: ${{ steps.semgrep.outputs.semgrep_high || '0' }}
           SEMGREP_NEW_HIGH: ${{ steps.semgrep.outputs.semgrep_new_high || '0' }}
           SEMGREP_EXISTING_HIGH: ${{ steps.semgrep.outputs.semgrep_existing_high || '0' }}
+          SEMGREP_IGNORED_HIGH: ${{ steps.semgrep.outputs.semgrep_ignored_high || '0' }}
           SEMGREP_MEDIUM: ${{ steps.semgrep.outputs.semgrep_medium || '0' }}
           SEMGREP_LOW: ${{ steps.semgrep.outputs.semgrep_low || '0' }}
           SEMGREP_TIME: ${{ steps.semgrep.outputs.semgrep_time || 'N/A' }}
@@ -2580,6 +3083,7 @@ Includes:
           GITLEAKS_BLOCKING: ${{ env.HAWKY_GATE_GITLEAKS_BLOCKING }}
           GITLEAKS_STATUS: ${{ steps.gitleaks.outputs.gitleaks_status || 'unknown' }}
           GITLEAKS_SECRETS: ${{ steps.gitleaks.outputs.gitleaks_secrets || '0' }}
+          GITLEAKS_IGNORED_SECRETS: ${{ steps.gitleaks.outputs.gitleaks_ignored || '0' }}
           GITLEAKS_TIME: ${{ steps.gitleaks.outputs.gitleaks_time || 'N/A' }}
           GITLEAKS_STEP_RAN: ${{ steps.gitleaks.outcome != 'skipped' }}
         run: |
@@ -2750,16 +3254,36 @@ Includes:
             echo "" >> /tmp/hawky-comment.md
           fi
 
-          # Add table header with baseline columns
-          echo "| Gate | Status | New | Existing | Time |" >> /tmp/hawky-comment.md
-          echo "|------|--------|-----|----------|------|" >> /tmp/hawky-comment.md
+          # S084: Show hawkyignore info if present
+          if [ "$HAWKYIGNORE_FOUND" = "true" ]; then
+            echo ":see_no_evil: **.hawkyignore** — $HAWKYIGNORE_PATTERNS pattern(s) active" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+          fi
+
+          # S084: Check if any ignored counts exist to add column
+          TOTAL_IGNORED=$((TSC_IGNORED_ERRORS + ESLINT_IGNORED_ERRORS + SEMGREP_IGNORED_HIGH + GITLEAKS_IGNORED_SECRETS))
+
+          # Add table header with baseline and ignored columns
+          if [ "$TOTAL_IGNORED" -gt 0 ]; then
+            echo "| Gate | Status | New | Existing | Ignored | Time |" >> /tmp/hawky-comment.md
+            echo "|------|--------|-----|----------|---------|------|" >> /tmp/hawky-comment.md
+          else
+            echo "| Gate | Status | New | Existing | Time |" >> /tmp/hawky-comment.md
+            echo "|------|--------|-----|----------|------|" >> /tmp/hawky-comment.md
+          fi
 
           # S081: Show new vs existing for gates with baseline support
+          # S084: Also show ignored counts
           TSC_DETAILS="${TSC_NEW_ERRORS} error(s)"
           if [ "$TSC_EXISTING_ERRORS" -gt 0 ]; then
             TSC_EXISTING_DISPLAY="$TSC_EXISTING_ERRORS"
           else
             TSC_EXISTING_DISPLAY="-"
+          fi
+          if [ "$TSC_IGNORED_ERRORS" -gt 0 ]; then
+            TSC_IGNORED_DISPLAY="$TSC_IGNORED_ERRORS"
+          else
+            TSC_IGNORED_DISPLAY="-"
           fi
 
           ESLINT_DETAILS="${ESLINT_NEW_ERRORS} error(s)"
@@ -2768,6 +3292,11 @@ Includes:
           else
             ESLINT_EXISTING_DISPLAY="-"
           fi
+          if [ "$ESLINT_IGNORED_ERRORS" -gt 0 ]; then
+            ESLINT_IGNORED_DISPLAY="$ESLINT_IGNORED_ERRORS"
+          else
+            ESLINT_IGNORED_DISPLAY="-"
+          fi
 
           SEMGREP_DETAILS="${SEMGREP_NEW_HIGH} high"
           if [ "$SEMGREP_EXISTING_HIGH" -gt 0 ]; then
@@ -2775,13 +3304,34 @@ Includes:
           else
             SEMGREP_EXISTING_DISPLAY="-"
           fi
+          if [ "$SEMGREP_IGNORED_HIGH" -gt 0 ]; then
+            SEMGREP_IGNORED_DISPLAY="$SEMGREP_IGNORED_HIGH"
+          else
+            SEMGREP_IGNORED_DISPLAY="-"
+          fi
 
-          echo "| TypeScript | $(status_icon "$TSC_STATUS") $TSC_STATUS | $TSC_DETAILS | $TSC_EXISTING_DISPLAY | $TSC_TIME |" >> /tmp/hawky-comment.md
-          echo "| Build | $(status_icon "$BUILD_STATUS") $BUILD_STATUS | ${BUILD_WARNINGS} warn | - | $BUILD_TIME |" >> /tmp/hawky-comment.md
-          echo "| Test | $(status_icon "$TEST_STATUS") $TEST_STATUS | ${TEST_FAILED} failed | - | $TEST_TIME |" >> /tmp/hawky-comment.md
-          echo "| ESLint | $(status_icon "$ESLINT_STATUS") $ESLINT_STATUS | $ESLINT_DETAILS | $ESLINT_EXISTING_DISPLAY | $ESLINT_TIME |" >> /tmp/hawky-comment.md
-          echo "| Semgrep | $(status_icon "$SEMGREP_STATUS") $SEMGREP_STATUS | $SEMGREP_DETAILS | $SEMGREP_EXISTING_DISPLAY | $SEMGREP_TIME |" >> /tmp/hawky-comment.md
-          echo "| Gitleaks | $(status_icon "$GITLEAKS_STATUS") $GITLEAKS_STATUS | ${GITLEAKS_SECRETS} secret(s) | - | $GITLEAKS_TIME |" >> /tmp/hawky-comment.md
+          if [ "$GITLEAKS_IGNORED_SECRETS" -gt 0 ]; then
+            GITLEAKS_IGNORED_DISPLAY="$GITLEAKS_IGNORED_SECRETS"
+          else
+            GITLEAKS_IGNORED_DISPLAY="-"
+          fi
+
+          # Build table rows
+          if [ "$TOTAL_IGNORED" -gt 0 ]; then
+            echo "| TypeScript | $(status_icon "$TSC_STATUS") $TSC_STATUS | $TSC_DETAILS | $TSC_EXISTING_DISPLAY | $TSC_IGNORED_DISPLAY | $TSC_TIME |" >> /tmp/hawky-comment.md
+            echo "| Build | $(status_icon "$BUILD_STATUS") $BUILD_STATUS | ${BUILD_WARNINGS} warn | - | - | $BUILD_TIME |" >> /tmp/hawky-comment.md
+            echo "| Test | $(status_icon "$TEST_STATUS") $TEST_STATUS | ${TEST_FAILED} failed | - | - | $TEST_TIME |" >> /tmp/hawky-comment.md
+            echo "| ESLint | $(status_icon "$ESLINT_STATUS") $ESLINT_STATUS | $ESLINT_DETAILS | $ESLINT_EXISTING_DISPLAY | $ESLINT_IGNORED_DISPLAY | $ESLINT_TIME |" >> /tmp/hawky-comment.md
+            echo "| Semgrep | $(status_icon "$SEMGREP_STATUS") $SEMGREP_STATUS | $SEMGREP_DETAILS | $SEMGREP_EXISTING_DISPLAY | $SEMGREP_IGNORED_DISPLAY | $SEMGREP_TIME |" >> /tmp/hawky-comment.md
+            echo "| Gitleaks | $(status_icon "$GITLEAKS_STATUS") $GITLEAKS_STATUS | ${GITLEAKS_SECRETS} secret(s) | - | $GITLEAKS_IGNORED_DISPLAY | $GITLEAKS_TIME |" >> /tmp/hawky-comment.md
+          else
+            echo "| TypeScript | $(status_icon "$TSC_STATUS") $TSC_STATUS | $TSC_DETAILS | $TSC_EXISTING_DISPLAY | $TSC_TIME |" >> /tmp/hawky-comment.md
+            echo "| Build | $(status_icon "$BUILD_STATUS") $BUILD_STATUS | ${BUILD_WARNINGS} warn | - | $BUILD_TIME |" >> /tmp/hawky-comment.md
+            echo "| Test | $(status_icon "$TEST_STATUS") $TEST_STATUS | ${TEST_FAILED} failed | - | $TEST_TIME |" >> /tmp/hawky-comment.md
+            echo "| ESLint | $(status_icon "$ESLINT_STATUS") $ESLINT_STATUS | $ESLINT_DETAILS | $ESLINT_EXISTING_DISPLAY | $ESLINT_TIME |" >> /tmp/hawky-comment.md
+            echo "| Semgrep | $(status_icon "$SEMGREP_STATUS") $SEMGREP_STATUS | $SEMGREP_DETAILS | $SEMGREP_EXISTING_DISPLAY | $SEMGREP_TIME |" >> /tmp/hawky-comment.md
+            echo "| Gitleaks | $(status_icon "$GITLEAKS_STATUS") $GITLEAKS_STATUS | ${GITLEAKS_SECRETS} secret(s) | - | $GITLEAKS_TIME |" >> /tmp/hawky-comment.md
+          fi
           echo "" >> /tmp/hawky-comment.md
 
           # Add details sections for failures
