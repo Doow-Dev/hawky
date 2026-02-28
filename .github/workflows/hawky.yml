@@ -1,0 +1,89 @@
+# Hawky - AI-powered Code Review for Multi-Agent Teams
+#
+# Required Secrets:
+#   HAWKY_CLAUDE_API_KEY - Claude API key for AI analysis (optional for scaffold)
+#   HAWKY_GITHUB_TOKEN   - GitHub PAT for cross-repo access (optional - use GITHUB_TOKEN for same-repo)
+#
+# The default GITHUB_TOKEN is sufficient for:
+#   - Reading PR metadata
+#   - Posting PR comments
+#   - Reading issues
+#
+# Only add HAWKY_GITHUB_TOKEN if cross-repo access is needed.
+
+name: Hawky Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Cancel in-progress runs when new commits push
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Explicit minimal permissions
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+jobs:
+  hawky-review:
+    name: Hawky Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # Checkout with full history for git analysis (E005)
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Setup Node.js 20
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Cache node_modules keyed on lock file
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        id: cache-node-modules
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/yarn.lock', '**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      # Cache TypeScript incremental build info
+      - name: Cache TypeScript build info
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tsbuildinfo
+            **/tsconfig.tsbuildinfo
+          key: ${{ runner.os }}-tsbuild-${{ hashFiles('**/tsconfig.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-tsbuild-${{ hashFiles('**/tsconfig.json') }}-
+            ${{ runner.os }}-tsbuild-
+
+      # PR Metadata - Available for future gates
+      - name: PR Metadata
+        id: pr-metadata
+        run: |
+          echo "PR Number: ${{ github.event.pull_request.number }}"
+          echo "PR Branch: ${{ github.head_ref }}"
+          echo "Base Branch: ${{ github.base_ref }}"
+          echo "Commit SHA: ${{ github.sha }}"
+          echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          echo "head_ref=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "base_ref=${{ github.base_ref }}" >> $GITHUB_OUTPUT
+
+      # Scaffold placeholder - future gates will replace this
+      - name: Hawky Scaffold Ready
+        run: |
+          echo "Hawky scaffold initialized successfully"
+          echo "PR #${{ github.event.pull_request.number }} ready for review"
+          echo "Branch: ${{ github.head_ref }} -> ${{ github.base_ref }}"
