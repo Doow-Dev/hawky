@@ -22,6 +22,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# Fail-fast configuration: stop subsequent gates when a blocking gate fails
+# Set HAWKY_FAIL_FAST to 'false' to run all gates regardless of prior failures
+env:
+  HAWKY_FAIL_FAST: 'true'
+
 # Explicit minimal permissions
 permissions:
   contents: read
@@ -174,8 +179,10 @@ jobs:
           exit 1
 
       # S003: Build Gate
+      # Skipped if TypeScript gate failed (fail-fast mode)
       - name: Build Gate
         id: build
+        if: ${{ steps.typecheck.outputs.tsc_status != 'failed' || env.HAWKY_FAIL_FAST != 'true' }}
         run: |
           echo "## Build Gate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -272,8 +279,10 @@ jobs:
           echo "Build passed in ${BUILD_TIME}s ($WARNING_COUNT warnings)"
 
       # S004: Test Gate
+      # Skipped if any prior blocking gate failed (fail-fast mode)
       - name: Test Gate
         id: test
+        if: ${{ (steps.typecheck.outputs.tsc_status != 'failed' && steps.build.outputs.build_status != 'failed') || env.HAWKY_FAIL_FAST != 'true' }}
         run: |
           echo "## Test Gate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -455,8 +464,10 @@ jobs:
           echo "Tests passed: $PASSED passed, $SKIPPED skipped in ${TEST_TIME}s"
 
       # S005: ESLint Gate
+      # Skipped if any prior blocking gate failed (fail-fast mode)
       - name: ESLint Gate
         id: eslint
+        if: ${{ (steps.typecheck.outputs.tsc_status != 'failed' && steps.build.outputs.build_status != 'failed' && steps.test.outputs.test_status != 'failed') || env.HAWKY_FAIL_FAST != 'true' }}
         run: |
           echo "## ESLint Gate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -687,31 +698,37 @@ jobs:
 
       # S006: Gate Report Summary
       # Posts/updates a PR comment with aggregated gate results
+      # S007: Now includes fail-fast skip detection
       - name: Gate Report Summary
         id: report
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          FAIL_FAST_ENABLED: ${{ env.HAWKY_FAIL_FAST }}
           TSC_STATUS: ${{ steps.typecheck.outputs.tsc_status || 'unknown' }}
           TSC_ERRORS: ${{ steps.typecheck.outputs.tsc_errors || '0' }}
           TSC_TIME: ${{ steps.typecheck.outputs.tsc_time || 'N/A' }}
           BUILD_STATUS: ${{ steps.build.outputs.build_status || 'unknown' }}
           BUILD_WARNINGS: ${{ steps.build.outputs.build_warnings || '0' }}
           BUILD_TIME: ${{ steps.build.outputs.build_time || 'N/A' }}
+          BUILD_STEP_RAN: ${{ steps.build.outcome != 'skipped' }}
           TEST_STATUS: ${{ steps.test.outputs.test_status || 'unknown' }}
           TEST_TOTAL: ${{ steps.test.outputs.test_total || '0' }}
           TEST_PASSED: ${{ steps.test.outputs.test_passed || '0' }}
           TEST_FAILED: ${{ steps.test.outputs.test_failed || '0' }}
           TEST_SKIPPED: ${{ steps.test.outputs.test_skipped || '0' }}
           TEST_TIME: ${{ steps.test.outputs.test_time || 'N/A' }}
+          TEST_STEP_RAN: ${{ steps.test.outcome != 'skipped' }}
           ESLINT_STATUS: ${{ steps.eslint.outputs.eslint_status || 'unknown' }}
           ESLINT_ERRORS: ${{ steps.eslint.outputs.eslint_errors || '0' }}
           ESLINT_WARNINGS: ${{ steps.eslint.outputs.eslint_warnings || '0' }}
           ESLINT_TIME: ${{ steps.eslint.outputs.eslint_time || 'N/A' }}
+          ESLINT_STEP_RAN: ${{ steps.eslint.outcome != 'skipped' }}
         run: |
           # Determine overall status
           OVERALL_STATUS="passed"
           FAILED_GATES=""
+          FAIL_FAST_SKIPPED=""
 
           # Check each gate status
           if [ "$TSC_STATUS" = "failed" ]; then
@@ -719,22 +736,35 @@ jobs:
             FAILED_GATES="$FAILED_GATES TypeScript"
           fi
 
-          if [ "$BUILD_STATUS" = "failed" ]; then
+          # Detect fail-fast skipped gates (step didn't run AND fail-fast is enabled AND a prior gate failed)
+          # Build gate skipped due to fail-fast?
+          if [ "$BUILD_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && [ "$TSC_STATUS" = "failed" ]; then
+            BUILD_STATUS="fail-fast"
+            FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED Build"
+          elif [ "$BUILD_STATUS" = "failed" ]; then
             OVERALL_STATUS="failed"
             FAILED_GATES="$FAILED_GATES Build"
           fi
 
-          if [ "$TEST_STATUS" = "failed" ]; then
+          # Test gate skipped due to fail-fast?
+          if [ "$TEST_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] || [ "$BUILD_STATUS" = "failed" ]); then
+            TEST_STATUS="fail-fast"
+            FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED Test"
+          elif [ "$TEST_STATUS" = "failed" ]; then
             OVERALL_STATUS="failed"
             FAILED_GATES="$FAILED_GATES Test"
           fi
 
-          if [ "$ESLINT_STATUS" = "failed" ]; then
+          # ESLint gate skipped due to fail-fast?
+          if [ "$ESLINT_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] || [ "$BUILD_STATUS" = "failed" ] || [ "$TEST_STATUS" = "failed" ]); then
+            ESLINT_STATUS="fail-fast"
+            FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED ESLint"
+          elif [ "$ESLINT_STATUS" = "failed" ]; then
             OVERALL_STATUS="failed"
             FAILED_GATES="$FAILED_GATES ESLint"
           fi
 
-          # Handle unknown statuses (likely step didn't run due to prior failure)
+          # Handle unknown statuses (step ran but produced no output - unusual)
           if [ "$TSC_STATUS" = "unknown" ] || [ "$BUILD_STATUS" = "unknown" ] || [ "$TEST_STATUS" = "unknown" ] || [ "$ESLINT_STATUS" = "unknown" ]; then
             if [ "$OVERALL_STATUS" != "failed" ]; then
               OVERALL_STATUS="partial"
@@ -756,6 +786,7 @@ jobs:
               passed) echo ":white_check_mark:" ;;
               failed) echo ":x:" ;;
               skipped) echo ":fast_forward:" ;;
+              fail-fast) echo ":stop_sign:" ;;
               *) echo ":grey_question:" ;;
             esac
           }
@@ -808,7 +839,20 @@ jobs:
             echo "" >> /tmp/hawky-comment.md
           fi
 
-          # Add skipped gates info if any
+          # Add fail-fast skipped gates info if any
+          if [ -n "$FAIL_FAST_SKIPPED" ]; then
+            echo "<details>" >> /tmp/hawky-comment.md
+            echo "<summary>:stop_sign: Fail-Fast Skipped Gates</summary>" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "The following gates were skipped due to a prior blocking failure:$FAIL_FAST_SKIPPED" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "_Fail-fast mode is enabled. Set \`HAWKY_FAIL_FAST: 'false'\` in workflow env to run all gates._" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "</details>" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+          fi
+
+          # Add skipped gates info if any (no config found)
           SKIPPED_GATES=""
           [ "$TSC_STATUS" = "skipped" ] && SKIPPED_GATES="$SKIPPED_GATES TypeScript,"
           [ "$BUILD_STATUS" = "skipped" ] && SKIPPED_GATES="$SKIPPED_GATES Build,"
