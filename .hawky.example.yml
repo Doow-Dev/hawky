@@ -199,3 +199,53 @@ gates:
 #
 # Use .hawkyignore for permanent suppressions. For temporary tech debt,
 # use baseline mode instead.
+
+# =============================================================================
+# Inline Suppressions (S085)
+# =============================================================================
+#
+# Use `hawk-ignore` comments to suppress specific violations inline.
+# All suppressions are tracked and surfaced in PR reviews for visibility.
+#
+# Syntax:
+#
+#   // hawk-ignore: reason for suppression
+#   const x = eval(code); // This would normally trigger a security warning
+#
+#   // hawk-ignore [semgrep:dangerous-eval]: Legacy code, scheduled for refactor Q3
+#   legacyFunction();
+#
+#   # hawk-ignore: Python style comment
+#   exec(user_input)  # noqa
+#
+# Supported comment styles:
+#   - JavaScript/TypeScript: // hawk-ignore or /* hawk-ignore */
+#   - Python/Ruby/Shell: # hawk-ignore
+#
+# Format options:
+#   - hawk-ignore: reason        - Suppress any rule with reason
+#   - hawk-ignore [rule]: reason - Suppress specific rule with reason
+#   - hawk-ignore [rule]         - Suppress specific rule (flagged as missing reason)
+#   - hawk-ignore                - Suppress any rule (flagged as missing reason)
+#
+# Best practices:
+#   1. Always include a reason - suppressions without reasons are flagged
+#   2. Be specific about which rule you're suppressing when possible
+#   3. Keep suppressions temporary - use baseline mode for tech debt
+#   4. Review suppressions in PRs - they appear in a dedicated section
+#
+# PR Comment shows:
+#   - New vs existing suppressions
+#   - Suppressions missing reasons (flagged with warning)
+#   - High suppression count warning (>5 new suppressions)
+#
+# Example output in PR comment:
+#
+#   ### Suppressions
+#   :new: This PR adds **3 new suppression(s)**
+#   :warning: **1 suppression(s)** are missing justification
+#
+#   | File | Line | Rule | Reason | Status |
+#   |------|------|------|--------|--------|
+#   | `src/api.ts` | 42 | `semgrep:eval` | Legacy pattern | :new: New |
+#   | `src/db.ts` | 15 | `eslint:no-console` | Debug logging | Existing |

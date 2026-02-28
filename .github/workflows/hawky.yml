@@ -1393,6 +1393,333 @@ Includes:
             npm install
           fi
 
+      # S085: Scan for hawk-ignore suppression comments in changed files
+      # Detects inline // hawk-ignore comments and tracks them for PR review
+      - name: Scan Hawk-Ignore Comments
+        id: suppressions
+        run: |
+          echo "## Suppressions Scan" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get changed files in PR (code files only)
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD 2>/dev/null | grep -E '\.(js|jsx|ts|tsx|mjs|cjs|py|go|java|rb|php|c|cpp|cs|rs|swift|kt|scala)$' || echo "")
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No code files changed — skipping suppression scan"
+            echo ":white_check_mark: **No suppressions found** — No code files changed" >> $GITHUB_STEP_SUMMARY
+            echo "suppressions_total=0" >> $GITHUB_OUTPUT
+            echo "suppressions_new=0" >> $GITHUB_OUTPUT
+            echo "suppressions_without_reason=0" >> $GITHUB_OUTPUT
+            echo "[]" > /tmp/hawky_suppressions.json
+            exit 0
+          fi
+
+          # Scan for hawk-ignore comments using Node.js
+          node << 'SUPPRESSION_SCRIPT'
+          const fs = require('fs');
+          const path = require('path');
+          const crypto = require('crypto');
+
+          // Get changed files from stdin/env
+          const changedFiles = process.env.CHANGED_FILES.split('\n').filter(f => f.trim());
+
+          // Load baseline suppressions if they exist
+          let baselineSuppressions = new Set();
+          try {
+            const baseline = JSON.parse(fs.readFileSync('.hawky/baseline.json', 'utf8'));
+            if (baseline.suppressions) {
+              baseline.suppressions.forEach(s => baselineSuppressions.add(s.hash));
+            }
+          } catch (e) {
+            // No baseline or no suppressions in baseline
+          }
+
+          const suppressions = [];
+          const suppressionPatterns = [
+            // hawk-ignore: reason
+            /\/\/\s*hawk-ignore\s*:\s*(.+)$/i,
+            // hawk-ignore [rule]: reason
+            /\/\/\s*hawk-ignore\s+\[([^\]]+)\]\s*:\s*(.+)$/i,
+            // hawk-ignore [rule]
+            /\/\/\s*hawk-ignore\s+\[([^\]]+)\]\s*$/i,
+            // hawk-ignore (bare, no reason)
+            /\/\/\s*hawk-ignore\s*$/i,
+            // Also support /* hawk-ignore */ style
+            /\/\*\s*hawk-ignore\s*:\s*(.+?)\s*\*\//i,
+            /\/\*\s*hawk-ignore\s+\[([^\]]+)\]\s*:\s*(.+?)\s*\*\//i,
+            /\/\*\s*hawk-ignore\s+\[([^\]]+)\]\s*\*\//i,
+            /\/\*\s*hawk-ignore\s*\*\//i,
+            // Python/Ruby style: # hawk-ignore
+            /#\s*hawk-ignore\s*:\s*(.+)$/i,
+            /#\s*hawk-ignore\s+\[([^\]]+)\]\s*:\s*(.+)$/i,
+            /#\s*hawk-ignore\s+\[([^\]]+)\]\s*$/i,
+            /#\s*hawk-ignore\s*$/i,
+          ];
+
+          for (const filePath of changedFiles) {
+            if (!fs.existsSync(filePath)) continue;
+
+            try {
+              const content = fs.readFileSync(filePath, 'utf8');
+              const lines = content.split('\n');
+
+              for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const lineNum = i + 1;
+
+                // Check each pattern
+                for (const pattern of suppressionPatterns) {
+                  const match = line.match(pattern);
+                  if (match) {
+                    let rule = null;
+                    let reason = null;
+
+                    // Parse based on capture groups
+                    if (match.length === 3) {
+                      // [rule]: reason
+                      rule = match[1].trim();
+                      reason = match[2].trim();
+                    } else if (match.length === 2) {
+                      // Could be just reason OR just rule depending on pattern
+                      const captured = match[1].trim();
+                      // If pattern has [rule] syntax, it's a rule
+                      if (pattern.source.includes('\\[')) {
+                        rule = captured;
+                      } else {
+                        reason = captured;
+                      }
+                    }
+                    // match.length === 1 means bare hawk-ignore
+
+                    // Generate stable hash for this suppression
+                    const context = lines.slice(Math.max(0, i - 1), Math.min(lines.length, i + 2)).join('\n');
+                    const hash = crypto.createHash('sha256')
+                      .update(filePath + ':' + (rule || 'any') + ':' + context)
+                      .digest('hex')
+                      .substring(0, 16);
+
+                    const isNew = !baselineSuppressions.has(hash);
+
+                    suppressions.push({
+                      file: filePath,
+                      line: lineNum,
+                      rule: rule,
+                      reason: reason,
+                      hash: hash,
+                      isNew: isNew,
+                      hasReason: !!reason
+                    });
+
+                    break; // Only match once per line
+                  }
+                }
+              }
+            } catch (e) {
+              console.error(`Error reading ${filePath}: ${e.message}`);
+            }
+          }
+
+          // Write results
+          fs.writeFileSync('/tmp/hawky_suppressions.json', JSON.stringify(suppressions, null, 2));
+
+          // Calculate stats
+          const total = suppressions.length;
+          const newCount = suppressions.filter(s => s.isNew).length;
+          const withoutReason = suppressions.filter(s => !s.hasReason).length;
+
+          // Output for GitHub Actions
+          console.log(`suppressions_total=${total}`);
+          console.log(`suppressions_new=${newCount}`);
+          console.log(`suppressions_without_reason=${withoutReason}`);
+
+          // Create summary for step
+          if (total === 0) {
+            console.log('SUMMARY::white_check_mark: **No suppressions found**');
+          } else {
+            console.log(`SUMMARY:Found ${total} suppression(s) (${newCount} new)`);
+          }
+
+          // Log details for debugging
+          if (total > 0) {
+            console.log('\nSuppressions found:');
+            suppressions.forEach(s => {
+              const status = s.isNew ? '[NEW]' : '[EXISTING]';
+              const reasonStatus = s.hasReason ? '' : ' [NO REASON]';
+              console.log(`  ${status} ${s.file}:${s.line} - ${s.rule || 'any'}${reasonStatus}`);
+            });
+          }
+          SUPPRESSION_SCRIPT
+
+          # Capture outputs from Node script
+          OUTPUT=$(CHANGED_FILES="$CHANGED_FILES" node << 'SUPPRESSION_SCRIPT'
+          const fs = require('fs');
+          const path = require('path');
+          const crypto = require('crypto');
+
+          // Get changed files from stdin/env
+          const changedFiles = process.env.CHANGED_FILES.split('\n').filter(f => f.trim());
+
+          // Load baseline suppressions if they exist
+          let baselineSuppressions = new Set();
+          try {
+            const baseline = JSON.parse(fs.readFileSync('.hawky/baseline.json', 'utf8'));
+            if (baseline.suppressions) {
+              baseline.suppressions.forEach(s => baselineSuppressions.add(s.hash));
+            }
+          } catch (e) {
+            // No baseline or no suppressions in baseline
+          }
+
+          const suppressions = [];
+          const suppressionPatterns = [
+            // hawk-ignore: reason
+            /\/\/\s*hawk-ignore\s*:\s*(.+)$/i,
+            // hawk-ignore [rule]: reason
+            /\/\/\s*hawk-ignore\s+\[([^\]]+)\]\s*:\s*(.+)$/i,
+            // hawk-ignore [rule]
+            /\/\/\s*hawk-ignore\s+\[([^\]]+)\]\s*$/i,
+            // hawk-ignore (bare, no reason)
+            /\/\/\s*hawk-ignore\s*$/i,
+            // Also support /* hawk-ignore */ style
+            /\/\*\s*hawk-ignore\s*:\s*(.+?)\s*\*\//i,
+            /\/\*\s*hawk-ignore\s+\[([^\]]+)\]\s*:\s*(.+?)\s*\*\//i,
+            /\/\*\s*hawk-ignore\s+\[([^\]]+)\]\s*\*\//i,
+            /\/\*\s*hawk-ignore\s*\*\//i,
+            // Python/Ruby style: # hawk-ignore
+            /#\s*hawk-ignore\s*:\s*(.+)$/i,
+            /#\s*hawk-ignore\s+\[([^\]]+)\]\s*:\s*(.+)$/i,
+            /#\s*hawk-ignore\s+\[([^\]]+)\]\s*$/i,
+            /#\s*hawk-ignore\s*$/i,
+          ];
+
+          for (const filePath of changedFiles) {
+            if (!fs.existsSync(filePath)) continue;
+
+            try {
+              const content = fs.readFileSync(filePath, 'utf8');
+              const lines = content.split('\n');
+
+              for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const lineNum = i + 1;
+
+                // Check each pattern
+                for (const pattern of suppressionPatterns) {
+                  const match = line.match(pattern);
+                  if (match) {
+                    let rule = null;
+                    let reason = null;
+
+                    // Parse based on capture groups
+                    if (match.length === 3) {
+                      // [rule]: reason
+                      rule = match[1].trim();
+                      reason = match[2].trim();
+                    } else if (match.length === 2) {
+                      // Could be just reason OR just rule depending on pattern
+                      const captured = match[1].trim();
+                      // If pattern has [rule] syntax, it's a rule
+                      if (pattern.source.includes('\\[')) {
+                        rule = captured;
+                      } else {
+                        reason = captured;
+                      }
+                    }
+                    // match.length === 1 means bare hawk-ignore
+
+                    // Generate stable hash for this suppression
+                    const context = lines.slice(Math.max(0, i - 1), Math.min(lines.length, i + 2)).join('\n');
+                    const hash = crypto.createHash('sha256')
+                      .update(filePath + ':' + (rule || 'any') + ':' + context)
+                      .digest('hex')
+                      .substring(0, 16);
+
+                    const isNew = !baselineSuppressions.has(hash);
+
+                    suppressions.push({
+                      file: filePath,
+                      line: lineNum,
+                      rule: rule,
+                      reason: reason,
+                      hash: hash,
+                      isNew: isNew,
+                      hasReason: !!reason
+                    });
+
+                    break; // Only match once per line
+                  }
+                }
+              }
+            } catch (e) {
+              console.error(`Error reading ${filePath}: ${e.message}`);
+            }
+          }
+
+          // Write results
+          fs.writeFileSync('/tmp/hawky_suppressions.json', JSON.stringify(suppressions, null, 2));
+
+          // Calculate stats
+          const total = suppressions.length;
+          const newCount = suppressions.filter(s => s.isNew).length;
+          const withoutReason = suppressions.filter(s => !s.hasReason).length;
+
+          // Output for GitHub Actions
+          console.log(`suppressions_total=${total}`);
+          console.log(`suppressions_new=${newCount}`);
+          console.log(`suppressions_without_reason=${withoutReason}`);
+          SUPPRESSION_SCRIPT
+          )
+
+          # Parse output into GITHUB_OUTPUT
+          echo "$OUTPUT" | grep "^suppressions_" >> $GITHUB_OUTPUT
+
+          # Read results for summary
+          TOTAL=$(echo "$OUTPUT" | grep "suppressions_total" | cut -d= -f2)
+          NEW_COUNT=$(echo "$OUTPUT" | grep "suppressions_new" | cut -d= -f2)
+          WITHOUT_REASON=$(echo "$OUTPUT" | grep "suppressions_without_reason" | cut -d= -f2)
+
+          if [ "$TOTAL" = "0" ]; then
+            echo ":white_check_mark: **No suppressions found**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo ":mag: **Found $TOTAL suppression(s)**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$NEW_COUNT" -gt 0 ]; then
+              echo ":new: **$NEW_COUNT new** suppression(s) in this PR" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            if [ "$WITHOUT_REASON" -gt 0 ]; then
+              echo ":warning: **$WITHOUT_REASON suppression(s)** without justification" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            # Warn if high suppression count
+            if [ "$NEW_COUNT" -gt 5 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "> :warning: **High suppression count** — More than 5 new suppressions. Please review justifications carefully." >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Suppression details</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| File | Line | Rule | Reason | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|------|------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            # Format suppressions as table
+            node -e "
+              const data = JSON.parse(require('fs').readFileSync('/tmp/hawky_suppressions.json', 'utf8'));
+              data.forEach(s => {
+                const status = s.isNew ? ':new: New' : 'Existing';
+                const rule = s.rule || '_any_';
+                const reason = s.hasReason ? s.reason : ':warning: _No reason_';
+                console.log('| \`' + s.file + '\` | ' + s.line + ' | \`' + rule + '\` | ' + reason + ' | ' + status + ' |');
+              });
+            " >> $GITHUB_STEP_SUMMARY
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
+
       # S002: TypeScript Strict Gate
       # S008: Respects HAWKY_GATE_TYPESCRIPT_ENABLED config
       # S081: Baseline comparison - only NEW errors block merge
@@ -3086,6 +3413,10 @@ Includes:
           GITLEAKS_IGNORED_SECRETS: ${{ steps.gitleaks.outputs.gitleaks_ignored || '0' }}
           GITLEAKS_TIME: ${{ steps.gitleaks.outputs.gitleaks_time || 'N/A' }}
           GITLEAKS_STEP_RAN: ${{ steps.gitleaks.outcome != 'skipped' }}
+          # S085: Suppression tracking
+          SUPPRESSIONS_TOTAL: ${{ steps.suppressions.outputs.suppressions_total || '0' }}
+          SUPPRESSIONS_NEW: ${{ steps.suppressions.outputs.suppressions_new || '0' }}
+          SUPPRESSIONS_WITHOUT_REASON: ${{ steps.suppressions.outputs.suppressions_without_reason || '0' }}
         run: |
           # Determine overall status
           OVERALL_STATUS="passed"
@@ -3333,6 +3664,52 @@ Includes:
             echo "| Gitleaks | $(status_icon "$GITLEAKS_STATUS") $GITLEAKS_STATUS | ${GITLEAKS_SECRETS} secret(s) | - | $GITLEAKS_TIME |" >> /tmp/hawky-comment.md
           fi
           echo "" >> /tmp/hawky-comment.md
+
+          # S085: Add Suppressions section if any found
+          if [ "$SUPPRESSIONS_TOTAL" -gt 0 ]; then
+            echo "### Suppressions" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+
+            # High suppression count warning
+            if [ "$SUPPRESSIONS_NEW" -gt 5 ]; then
+              echo ":warning: **High suppression count** — This PR adds $SUPPRESSIONS_NEW new suppression(s). Please review justifications carefully." >> /tmp/hawky-comment.md
+              echo "" >> /tmp/hawky-comment.md
+            elif [ "$SUPPRESSIONS_NEW" -gt 0 ]; then
+              echo ":new: This PR adds **$SUPPRESSIONS_NEW new suppression(s)**" >> /tmp/hawky-comment.md
+              echo "" >> /tmp/hawky-comment.md
+            fi
+
+            # Suppressions without reason warning
+            if [ "$SUPPRESSIONS_WITHOUT_REASON" -gt 0 ]; then
+              echo ":warning: **$SUPPRESSIONS_WITHOUT_REASON suppression(s)** are missing justification" >> /tmp/hawky-comment.md
+              echo "" >> /tmp/hawky-comment.md
+            fi
+
+            echo "<details>" >> /tmp/hawky-comment.md
+            echo "<summary>:see_no_evil: View all $SUPPRESSIONS_TOTAL suppression(s)</summary>" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "| File | Line | Rule | Reason | Status |" >> /tmp/hawky-comment.md
+            echo "|------|------|------|--------|--------|" >> /tmp/hawky-comment.md
+
+            # Format suppressions as table from JSON
+            if [ -f "/tmp/hawky_suppressions.json" ]; then
+              node -e "
+                const data = JSON.parse(require('fs').readFileSync('/tmp/hawky_suppressions.json', 'utf8'));
+                data.forEach(s => {
+                  const status = s.isNew ? ':new: New' : 'Existing';
+                  const rule = s.rule || '_any_';
+                  const reason = s.hasReason ? s.reason : ':warning: _No reason_';
+                  // Escape markdown in reason
+                  const safeReason = reason.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+                  console.log('| \`' + s.file + '\` | ' + s.line + ' | \`' + rule + '\` | ' + safeReason + ' | ' + status + ' |');
+                });
+              " >> /tmp/hawky-comment.md
+            fi
+
+            echo "" >> /tmp/hawky-comment.md
+            echo "</details>" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+          fi
 
           # Add details sections for failures
           if [ "$OVERALL_STATUS" = "failed" ]; then
