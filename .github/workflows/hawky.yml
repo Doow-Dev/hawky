@@ -16,10 +16,27 @@ name: Hawky Code Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # S081: Baseline generation via workflow_dispatch
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'review'
+        type: choice
+        options:
+          - review
+          - baseline
+          - baseline-update
+      baseline_branch:
+        description: 'Branch to generate baseline from (for baseline mode)'
+        required: false
+        default: 'main'
+        type: string
 
 # Cancel in-progress runs when new commits push
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 # Default configuration (can be overridden by .hawky.yml)
@@ -53,16 +70,391 @@ env:
   HAWKY_GATE_GITLEAKS_TIMEOUT: '300'
 
 # Explicit minimal permissions
+# S081: contents: write needed for baseline commits
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   issues: read
 
 jobs:
+  # S081: Baseline generation job - runs on workflow_dispatch with baseline mode
+  hawky-baseline:
+    name: Generate Baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'baseline' || inputs.mode == 'baseline-update') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.baseline_branch || 'main' }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        id: cache-node-modules
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/yarn.lock', '**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: |
+          if [ -f yarn.lock ]; then
+            yarn install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          fi
+
+      - name: Generate Baseline
+        id: baseline
+        run: |
+          echo "## Hawky Baseline Generation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ inputs.baseline_branch || 'main' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Mode:** \`${{ inputs.mode }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Create baseline directory
+          mkdir -p .hawky
+
+          # Initialize baseline JSON
+          BASELINE_FILE=".hawky/baseline.json"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Start baseline structure
+          echo "{" > /tmp/baseline.json
+          echo "  \"version\": \"1.0.0\"," >> /tmp/baseline.json
+          echo "  \"generated_at\": \"$TIMESTAMP\"," >> /tmp/baseline.json
+          echo "  \"branch\": \"${{ inputs.baseline_branch || 'main' }}\"," >> /tmp/baseline.json
+          echo "  \"commit\": \"${{ github.sha }}\"," >> /tmp/baseline.json
+          echo "  \"violations\": [" >> /tmp/baseline.json
+
+          VIOLATIONS_COUNT=0
+          FIRST_VIOLATION=true
+
+          # Helper function to compute 5-line context hash
+          # Uses sha256(rule_id + ":" + normalized_5_line_context)
+          compute_hash() {
+            local rule_id="$1"
+            local file="$2"
+            local line="$3"
+
+            # Get file content if it exists
+            if [ ! -f "$file" ]; then
+              echo "no-file-hash-$(echo "$rule_id:$file:$line" | sha256sum | cut -d' ' -f1)"
+              return
+            fi
+
+            # Get 5-line context (line - 2 to line + 2)
+            local start_line=$((line > 2 ? line - 2 : 1))
+            local end_line=$((line + 2))
+
+            # Extract lines and normalize whitespace (trim, collapse spaces)
+            local context=$(sed -n "${start_line},${end_line}p" "$file" 2>/dev/null | \
+              sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
+              tr -s '[:space:]' ' ' | \
+              tr '\n' ' ' | \
+              sed 's/[[:space:]]*$//')
+
+            # Compute hash
+            echo "$rule_id:$context" | sha256sum | cut -d' ' -f1
+          }
+
+          # Function to add violation to baseline
+          add_violation() {
+            local rule="$1"
+            local file="$2"
+            local line="$3"
+            local gate="$4"
+            local message="$5"
+
+            local hash=$(compute_hash "$rule" "$file" "$line")
+
+            if [ "$FIRST_VIOLATION" = "false" ]; then
+              echo "," >> /tmp/baseline.json
+            fi
+            FIRST_VIOLATION=false
+
+            cat >> /tmp/baseline.json << VIOLATION_EOF
+    {
+      "rule": "$rule",
+      "file": "$file",
+      "line_hint": $line,
+      "hash": "$hash",
+      "gate": "$gate",
+      "message": $(echo "$message" | head -c 200 | node -e "console.log(JSON.stringify(require('fs').readFileSync(0, 'utf8').trim()))"),
+      "first_seen": "$TIMESTAMP"
+    }
+VIOLATION_EOF
+            VIOLATIONS_COUNT=$((VIOLATIONS_COUNT + 1))
+          }
+
+          echo "### Scanning for violations..." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # ==========================================
+          # TypeScript Violations
+          # ==========================================
+          TSC_VIOLATIONS=0
+          if [ -f tsconfig.json ] && npx tsc --version > /dev/null 2>&1; then
+            echo "**TypeScript:** Scanning..." >> $GITHUB_STEP_SUMMARY
+
+            TSC_OUTPUT=$(npx tsc --noEmit 2>&1 || true)
+
+            # Parse TypeScript errors: file(line,col): error TSxxxx: message
+            while IFS= read -r line; do
+              if [[ "$line" =~ ^([^(]+)\(([0-9]+),([0-9]+)\):\ error\ (TS[0-9]+):\ (.*)$ ]]; then
+                FILE="${BASH_REMATCH[1]}"
+                LINE_NUM="${BASH_REMATCH[2]}"
+                RULE="${BASH_REMATCH[4]}"
+                MSG="${BASH_REMATCH[5]}"
+
+                add_violation "$RULE" "$FILE" "$LINE_NUM" "typescript" "$MSG"
+                TSC_VIOLATIONS=$((TSC_VIOLATIONS + 1))
+              fi
+            done <<< "$TSC_OUTPUT"
+
+            echo "**TypeScript:** $TSC_VIOLATIONS violation(s)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**TypeScript:** Skipped (not configured)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # ==========================================
+          # ESLint Violations
+          # ==========================================
+          ESLINT_VIOLATIONS=0
+
+          # Check for ESLint config
+          ESLINT_CONFIG=""
+          for config in .eslintrc .eslintrc.js .eslintrc.cjs .eslintrc.json .eslintrc.yml .eslintrc.yaml eslint.config.js eslint.config.mjs eslint.config.cjs; do
+            if [ -f "$config" ]; then
+              ESLINT_CONFIG="$config"
+              break
+            fi
+          done
+
+          # Also check package.json for eslintConfig
+          if [ -z "$ESLINT_CONFIG" ] && [ -f package.json ]; then
+            if node -e "const pkg = require('./package.json'); if (pkg.eslintConfig) process.exit(0); else process.exit(1);" 2>/dev/null; then
+              ESLINT_CONFIG="package.json"
+            fi
+          fi
+
+          if [ -n "$ESLINT_CONFIG" ] && command -v npx &> /dev/null; then
+            echo "**ESLint:** Scanning..." >> $GITHUB_STEP_SUMMARY
+
+            # Get all JS/TS files
+            JS_TS_FILES=$(find . -type f \( -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -o -name "*.mjs" -o -name "*.cjs" \) \
+              -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/dist/*" -not -path "*/build/*" 2>/dev/null | head -1000)
+
+            if [ -n "$JS_TS_FILES" ]; then
+              ESLINT_OUTPUT=$(echo "$JS_TS_FILES" | xargs npx eslint --format json 2>/dev/null || echo "[]")
+
+              # Parse ESLint JSON output
+              echo "$ESLINT_OUTPUT" | node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                const violations = [];
+                (Array.isArray(data) ? data : []).forEach(file => {
+                  (file.messages || []).forEach(msg => {
+                    if (msg.severity >= 1) {  // 1 = warning, 2 = error
+                      violations.push({
+                        file: file.filePath.replace(process.cwd() + '/', ''),
+                        line: msg.line || 1,
+                        rule: msg.ruleId || 'unknown',
+                        message: msg.message || ''
+                      });
+                    }
+                  });
+                });
+                violations.forEach(v => {
+                  console.log(JSON.stringify(v));
+                });
+              " 2>/dev/null | while IFS= read -r violation; do
+                FILE=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).file)")
+                LINE_NUM=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).line)")
+                RULE=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).rule)")
+                MSG=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).message)")
+
+                add_violation "eslint:$RULE" "$FILE" "$LINE_NUM" "eslint" "$MSG"
+                ESLINT_VIOLATIONS=$((ESLINT_VIOLATIONS + 1))
+              done
+
+              echo "**ESLint:** $ESLINT_VIOLATIONS violation(s)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "**ESLint:** No files to scan" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "**ESLint:** Skipped (not configured)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # ==========================================
+          # Semgrep Violations
+          # ==========================================
+          SEMGREP_VIOLATIONS=0
+          if command -v semgrep &> /dev/null || pip install semgrep > /dev/null 2>&1; then
+            echo "**Semgrep:** Scanning..." >> $GITHUB_STEP_SUMMARY
+
+            SEMGREP_OUTPUT=$(semgrep scan --config=p/security-audit --json . 2>/dev/null || echo '{"results":[]}')
+
+            echo "$SEMGREP_OUTPUT" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              (data.results || []).forEach(result => {
+                console.log(JSON.stringify({
+                  file: result.path,
+                  line: result.start?.line || 1,
+                  rule: result.check_id,
+                  message: result.extra?.message || 'Security finding'
+                }));
+              });
+            " 2>/dev/null | while IFS= read -r violation; do
+              FILE=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).file)")
+              LINE_NUM=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).line)")
+              RULE=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).rule)")
+              MSG=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).message)")
+
+              add_violation "semgrep:$RULE" "$FILE" "$LINE_NUM" "semgrep" "$MSG"
+              SEMGREP_VIOLATIONS=$((SEMGREP_VIOLATIONS + 1))
+            done
+
+            echo "**Semgrep:** $SEMGREP_VIOLATIONS violation(s)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Semgrep:** Skipped (not available)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # ==========================================
+          # Gitleaks Violations (Secrets)
+          # ==========================================
+          GITLEAKS_VIOLATIONS=0
+          if command -v gitleaks &> /dev/null; then
+            echo "**Gitleaks:** Scanning..." >> $GITHUB_STEP_SUMMARY
+
+            GITLEAKS_OUTPUT=$(gitleaks detect --source . --report-format json --report-path /tmp/gitleaks-baseline.json --no-git 2>&1 || true)
+
+            if [ -f /tmp/gitleaks-baseline.json ]; then
+              node -e "
+                const data = JSON.parse(require('fs').readFileSync('/tmp/gitleaks-baseline.json', 'utf8'));
+                (Array.isArray(data) ? data : []).forEach(finding => {
+                  console.log(JSON.stringify({
+                    file: finding.File,
+                    line: finding.StartLine || 1,
+                    rule: finding.RuleID,
+                    message: finding.Description || 'Potential secret'
+                  }));
+                });
+              " 2>/dev/null | while IFS= read -r violation; do
+                FILE=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).file)")
+                LINE_NUM=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).line)")
+                RULE=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).rule)")
+                MSG=$(echo "$violation" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).message)")
+
+                add_violation "gitleaks:$RULE" "$FILE" "$LINE_NUM" "gitleaks" "$MSG"
+                GITLEAKS_VIOLATIONS=$((GITLEAKS_VIOLATIONS + 1))
+              done
+            fi
+
+            echo "**Gitleaks:** $GITLEAKS_VIOLATIONS finding(s)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Gitleaks:** Skipped (not available)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Close JSON array and object
+          echo "" >> /tmp/baseline.json
+          echo "  ]," >> /tmp/baseline.json
+          echo "  \"summary\": {" >> /tmp/baseline.json
+          echo "    \"total\": $VIOLATIONS_COUNT," >> /tmp/baseline.json
+          echo "    \"typescript\": $TSC_VIOLATIONS," >> /tmp/baseline.json
+          echo "    \"eslint\": $ESLINT_VIOLATIONS," >> /tmp/baseline.json
+          echo "    \"semgrep\": $SEMGREP_VIOLATIONS," >> /tmp/baseline.json
+          echo "    \"gitleaks\": $GITLEAKS_VIOLATIONS" >> /tmp/baseline.json
+          echo "  }" >> /tmp/baseline.json
+          echo "}" >> /tmp/baseline.json
+
+          # Validate JSON and format
+          if node -e "JSON.parse(require('fs').readFileSync('/tmp/baseline.json', 'utf8'))" 2>/dev/null; then
+            # Format JSON nicely
+            node -e "
+              const data = JSON.parse(require('fs').readFileSync('/tmp/baseline.json', 'utf8'));
+              console.log(JSON.stringify(data, null, 2));
+            " > "$BASELINE_FILE"
+            echo "baseline_valid=true" >> $GITHUB_OUTPUT
+          else
+            echo "Error: Generated baseline JSON is invalid"
+            cat /tmp/baseline.json
+            echo "baseline_valid=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Gate | Violations |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| TypeScript | $TSC_VIOLATIONS |" >> $GITHUB_STEP_SUMMARY
+          echo "| ESLint | $ESLINT_VIOLATIONS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Semgrep | $SEMGREP_VIOLATIONS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Gitleaks | $GITLEAKS_VIOLATIONS |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total** | **$VIOLATIONS_COUNT** |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo ":white_check_mark: Baseline saved to \`.hawky/baseline.json\`" >> $GITHUB_STEP_SUMMARY
+
+          echo "violations_count=$VIOLATIONS_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Commit Baseline
+        if: steps.baseline.outputs.baseline_valid == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Configure git
+          git config user.name "Hawky Bot"
+          git config user.email "hawky-bot@users.noreply.github.com"
+
+          # Check if baseline changed
+          if git diff --quiet .hawky/baseline.json 2>/dev/null; then
+            echo "No changes to baseline"
+            echo "## Baseline Unchanged" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The baseline file has not changed since the last generation." >> $GITHUB_STEP_SUMMARY
+          else
+            # Stage and commit
+            git add .hawky/baseline.json
+
+            COMMIT_MSG="chore(hawky): update baseline
+
+Generated by Hawky baseline scan.
+Branch: ${{ inputs.baseline_branch || 'main' }}
+Violations: ${{ steps.baseline.outputs.violations_count }}
+Mode: ${{ inputs.mode }}"
+
+            git commit -m "$COMMIT_MSG"
+
+            # Push to the baseline branch
+            git push origin HEAD:${{ inputs.baseline_branch || 'main' }}
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "---" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo ":rocket: **Baseline committed and pushed to \`${{ inputs.baseline_branch || 'main' }}\`**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Main review job - runs on pull_request or workflow_dispatch with review mode
   hawky-review:
     name: Hawky Review
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'review') }}
 
     steps:
       # Checkout with full history for git analysis (E005)
@@ -242,6 +634,110 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "</details>" >> $GITHUB_STEP_SUMMARY
 
+      # S081: Load baseline for comparison
+      - name: Load Baseline
+        id: baseline
+        run: |
+          BASELINE_FILE=".hawky/baseline.json"
+
+          if [ ! -f "$BASELINE_FILE" ]; then
+            echo "No baseline found — all violations will be treated as new"
+            echo "baseline_found=false" >> $GITHUB_OUTPUT
+            echo "baseline_count=0" >> $GITHUB_OUTPUT
+            # Create empty baseline hashes file
+            echo "[]" > /tmp/baseline_hashes.json
+          else
+            echo "Baseline found: $BASELINE_FILE"
+            echo "baseline_found=true" >> $GITHUB_OUTPUT
+
+            # Extract violation count and hashes
+            BASELINE_COUNT=$(node -e "
+              const data = JSON.parse(require('fs').readFileSync('$BASELINE_FILE', 'utf8'));
+              console.log(data.summary?.total || data.violations?.length || 0);
+            ")
+            echo "baseline_count=$BASELINE_COUNT" >> $GITHUB_OUTPUT
+
+            # Extract all hashes for quick lookup
+            node -e "
+              const data = JSON.parse(require('fs').readFileSync('$BASELINE_FILE', 'utf8'));
+              const hashes = (data.violations || []).map(v => v.hash);
+              console.log(JSON.stringify(hashes));
+            " > /tmp/baseline_hashes.json
+
+            echo "Loaded $BASELINE_COUNT baseline violation(s)"
+
+            # Show baseline info in summary
+            echo "## Baseline" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo ":bookmark: **Baseline loaded** — $BASELINE_COUNT existing violation(s)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Show baseline summary
+            node -e "
+              const data = JSON.parse(require('fs').readFileSync('$BASELINE_FILE', 'utf8'));
+              console.log('| Gate | Existing |');
+              console.log('|------|----------|');
+              console.log('| TypeScript | ' + (data.summary?.typescript || 0) + ' |');
+              console.log('| ESLint | ' + (data.summary?.eslint || 0) + ' |');
+              console.log('| Semgrep | ' + (data.summary?.semgrep || 0) + ' |');
+              console.log('| Gitleaks | ' + (data.summary?.gitleaks || 0) + ' |');
+            " >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Only NEW violations (not in baseline) will block merge._" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Create baseline hash lookup script for use by gates
+          cat > /tmp/check_baseline.js << 'BASELINE_SCRIPT'
+          const crypto = require('crypto');
+          const fs = require('fs');
+
+          // Load baseline hashes
+          const baselineHashes = new Set(JSON.parse(fs.readFileSync('/tmp/baseline_hashes.json', 'utf8')));
+
+          // Compute hash for a violation using 5-line context
+          function computeHash(ruleId, filePath, lineNum) {
+            try {
+              if (!fs.existsSync(filePath)) {
+                return crypto.createHash('sha256').update(`no-file:${ruleId}:${filePath}:${lineNum}`).digest('hex');
+              }
+
+              const content = fs.readFileSync(filePath, 'utf8').split('\n');
+              const startLine = Math.max(0, lineNum - 3); // 0-indexed, so -3 for line-2
+              const endLine = Math.min(content.length, lineNum + 2); // +2 for line+2
+
+              // Get 5-line context, normalize whitespace
+              const context = content.slice(startLine, endLine)
+                .map(line => line.trim().replace(/\s+/g, ' '))
+                .join(' ')
+                .trim();
+
+              return crypto.createHash('sha256').update(`${ruleId}:${context}`).digest('hex');
+            } catch (e) {
+              return crypto.createHash('sha256').update(`error:${ruleId}:${filePath}:${lineNum}`).digest('hex');
+            }
+          }
+
+          // Check if violation is in baseline
+          function isInBaseline(ruleId, filePath, lineNum) {
+            const hash = computeHash(ruleId, filePath, lineNum);
+            return baselineHashes.has(hash);
+          }
+
+          // Export for use
+          module.exports = { computeHash, isInBaseline, baselineHashes };
+
+          // CLI mode: check_baseline.js <rule> <file> <line>
+          if (require.main === module) {
+            const [,, rule, file, line] = process.argv;
+            if (rule && file && line) {
+              const inBaseline = isInBaseline(rule, file, parseInt(line));
+              console.log(inBaseline ? 'baseline' : 'new');
+              process.exit(inBaseline ? 0 : 1);
+            }
+          }
+          BASELINE_SCRIPT
+
       # Install dependencies (if not cached)
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -256,6 +752,7 @@ jobs:
 
       # S002: TypeScript Strict Gate
       # S008: Respects HAWKY_GATE_TYPESCRIPT_ENABLED config
+      # S081: Baseline comparison - only NEW errors block merge
       - name: TypeScript Strict Gate
         id: typecheck
         if: ${{ env.HAWKY_GATE_TYPESCRIPT_ENABLED != 'false' }}
@@ -269,6 +766,8 @@ jobs:
             echo ":white_check_mark: **Skipped** — No tsconfig.json found" >> $GITHUB_STEP_SUMMARY
             echo "tsc_status=skipped" >> $GITHUB_OUTPUT
             echo "tsc_errors=0" >> $GITHUB_OUTPUT
+            echo "tsc_new_errors=0" >> $GITHUB_OUTPUT
+            echo "tsc_existing_errors=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -278,6 +777,8 @@ jobs:
             echo ":white_check_mark: **Skipped** — TypeScript not installed" >> $GITHUB_STEP_SUMMARY
             echo "tsc_status=skipped" >> $GITHUB_OUTPUT
             echo "tsc_errors=0" >> $GITHUB_OUTPUT
+            echo "tsc_new_errors=0" >> $GITHUB_OUTPUT
+            echo "tsc_existing_errors=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -305,36 +806,92 @@ jobs:
             echo ":white_check_mark: **Passed** — No type errors" >> $GITHUB_STEP_SUMMARY
             echo "TypeScript check passed — no errors"
             echo "tsc_status=passed" >> $GITHUB_OUTPUT
+            echo "tsc_new_errors=0" >> $GITHUB_OUTPUT
+            echo "tsc_existing_errors=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Parse errors and create annotations
-          echo ":x: **Failed** — $ERROR_COUNT type error(s) found" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Errors" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "$TSC_OUTPUT" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          # S081: Parse errors and classify as new vs existing (baseline)
+          NEW_ERRORS=0
+          EXISTING_ERRORS=0
+          NEW_ERROR_LIST=""
+          EXISTING_ERROR_LIST=""
 
-          # Parse each error line and emit GitHub annotation
-          # Format: path/to/file.ts(line,col): error TS1234: message
-          echo "$TSC_OUTPUT" | while IFS= read -r line; do
+          # Process each error with baseline check
+          while IFS= read -r line; do
             # Match TypeScript error format: file(line,col): error TSxxxx: message
             if [[ "$line" =~ ^([^(]+)\(([0-9]+),([0-9]+)\):\ error\ (TS[0-9]+):\ (.*)$ ]]; then
               FILE="${BASH_REMATCH[1]}"
-              LINE="${BASH_REMATCH[2]}"
+              LINE_NUM="${BASH_REMATCH[2]}"
               COL="${BASH_REMATCH[3]}"
               CODE="${BASH_REMATCH[4]}"
               MSG="${BASH_REMATCH[5]}"
-              echo "::error file=$FILE,line=$LINE,col=$COL,title=TypeScript $CODE::$MSG"
-            fi
-          done
 
-          echo ""
-          echo "TypeScript check failed with $ERROR_COUNT error(s)"
-          echo "tsc_status=failed" >> $GITHUB_OUTPUT
-          exit 1
+              # Check if this error is in the baseline
+              IN_BASELINE=$(node /tmp/check_baseline.js "$CODE" "$FILE" "$LINE_NUM" 2>/dev/null && echo "yes" || echo "no")
+
+              if [ "$IN_BASELINE" = "yes" ]; then
+                EXISTING_ERRORS=$((EXISTING_ERRORS + 1))
+                EXISTING_ERROR_LIST="$EXISTING_ERROR_LIST\n$FILE($LINE_NUM,$COL): $CODE: $MSG"
+              else
+                NEW_ERRORS=$((NEW_ERRORS + 1))
+                NEW_ERROR_LIST="$NEW_ERROR_LIST\n$FILE($LINE_NUM,$COL): $CODE: $MSG"
+                # Only annotate NEW errors as blocking
+                echo "::error file=$FILE,line=$LINE_NUM,col=$COL,title=TypeScript $CODE::$MSG"
+              fi
+            fi
+          done <<< "$TSC_OUTPUT"
+
+          echo "tsc_new_errors=$NEW_ERRORS" >> $GITHUB_OUTPUT
+          echo "tsc_existing_errors=$EXISTING_ERRORS" >> $GITHUB_OUTPUT
+
+          # Report based on new vs existing
+          if [ "$NEW_ERRORS" -gt 0 ]; then
+            echo ":x: **Failed** — $NEW_ERRORS NEW type error(s)" >> $GITHUB_STEP_SUMMARY
+            if [ "$EXISTING_ERRORS" -gt 0 ]; then
+              echo ":white_circle: **Existing** — $EXISTING_ERRORS error(s) in baseline" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### New Errors (blocking)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo -e "$NEW_ERROR_LIST" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$EXISTING_ERRORS" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Existing Errors (in baseline, not blocking)</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo -e "$EXISTING_ERROR_LIST" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo ""
+            echo "TypeScript check failed with $NEW_ERRORS NEW error(s) ($EXISTING_ERRORS existing)"
+            echo "tsc_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          elif [ "$EXISTING_ERRORS" -gt 0 ]; then
+            # Only existing errors - pass (baseline mode)
+            echo ":white_check_mark: **Passed** — No NEW type errors" >> $GITHUB_STEP_SUMMARY
+            echo ":white_circle: **Existing** — $EXISTING_ERRORS error(s) in baseline (not blocking)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Existing Errors (in baseline)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo -e "$EXISTING_ERROR_LIST" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Run \`hawky baseline --update\` to refresh the baseline after fixing issues._" >> $GITHUB_STEP_SUMMARY
+
+            echo "TypeScript check passed — $EXISTING_ERRORS existing error(s) in baseline"
+            echo "tsc_status=passed" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
       # S003: Build Gate
       # S008: Respects HAWKY_GATE_BUILD_ENABLED and HAWKY_GATE_TYPESCRIPT_BLOCKING configs
@@ -637,6 +1194,7 @@ jobs:
 
       # S005: ESLint Gate
       # S008: Respects HAWKY_GATE_ESLINT_ENABLED and blocking configs
+      # S081: Baseline comparison - only NEW errors block merge
       # Skipped if any prior blocking gate failed (fail-fast mode)
       - name: ESLint Gate
         id: eslint
@@ -670,6 +1228,8 @@ jobs:
             echo "eslint_status=skipped" >> $GITHUB_OUTPUT
             echo "eslint_errors=0" >> $GITHUB_OUTPUT
             echo "eslint_warnings=0" >> $GITHUB_OUTPUT
+            echo "eslint_new_errors=0" >> $GITHUB_OUTPUT
+            echo "eslint_existing_errors=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -680,6 +1240,8 @@ jobs:
             echo "eslint_status=skipped" >> $GITHUB_OUTPUT
             echo "eslint_errors=0" >> $GITHUB_OUTPUT
             echo "eslint_warnings=0" >> $GITHUB_OUTPUT
+            echo "eslint_new_errors=0" >> $GITHUB_OUTPUT
+            echo "eslint_existing_errors=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -698,6 +1260,8 @@ jobs:
             echo "eslint_status=skipped" >> $GITHUB_OUTPUT
             echo "eslint_errors=0" >> $GITHUB_OUTPUT
             echo "eslint_warnings=0" >> $GITHUB_OUTPUT
+            echo "eslint_new_errors=0" >> $GITHUB_OUTPUT
+            echo "eslint_existing_errors=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -721,6 +1285,8 @@ jobs:
             echo "eslint_status=skipped" >> $GITHUB_OUTPUT
             echo "eslint_errors=0" >> $GITHUB_OUTPUT
             echo "eslint_warnings=0" >> $GITHUB_OUTPUT
+            echo "eslint_new_errors=0" >> $GITHUB_OUTPUT
+            echo "eslint_existing_errors=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -739,43 +1305,96 @@ jobs:
           # Output lint time for summary
           echo "eslint_time=${ESLINT_TIME}s" >> $GITHUB_OUTPUT
 
-          # Parse JSON output
+          # Parse JSON output with S081 baseline comparison
           # ESLint JSON format: [{ filePath, messages: [{ ruleId, severity, message, line, column }], errorCount, warningCount }]
           ERROR_COUNT=0
           WARNING_COUNT=0
+          NEW_ERRORS=0
+          EXISTING_ERRORS=0
 
           # Check if output is valid JSON
           if echo "$ESLINT_OUTPUT" | node -e "JSON.parse(require('fs').readFileSync(0, 'utf8'))" 2>/dev/null; then
-            # Parse with Node.js for reliable JSON handling
+            # S081: Parse with baseline check using Node.js
             PARSED=$(echo "$ESLINT_OUTPUT" | node -e "
-              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-              let errors = 0, warnings = 0;
-              const annotations = [];
+              const crypto = require('crypto');
+              const fs = require('fs');
+
+              // Load baseline hashes
+              const baselineHashes = new Set(JSON.parse(fs.readFileSync('/tmp/baseline_hashes.json', 'utf8')));
+
+              // Compute hash for violation
+              function computeHash(ruleId, filePath, lineNum) {
+                try {
+                  if (!fs.existsSync(filePath)) {
+                    return crypto.createHash('sha256').update('no-file:eslint:' + ruleId + ':' + filePath + ':' + lineNum).digest('hex');
+                  }
+                  const content = fs.readFileSync(filePath, 'utf8').split('\n');
+                  const startLine = Math.max(0, lineNum - 3);
+                  const endLine = Math.min(content.length, lineNum + 2);
+                  const context = content.slice(startLine, endLine)
+                    .map(line => line.trim().replace(/\s+/g, ' '))
+                    .join(' ')
+                    .trim();
+                  return crypto.createHash('sha256').update('eslint:' + ruleId + ':' + context).digest('hex');
+                } catch (e) {
+                  return crypto.createHash('sha256').update('error:eslint:' + ruleId + ':' + filePath + ':' + lineNum).digest('hex');
+                }
+              }
+
+              const data = JSON.parse(fs.readFileSync(0, 'utf8'));
+              let totalErrors = 0, warnings = 0, newErrors = 0, existingErrors = 0;
+              const newAnnotations = [];
+              const existingAnnotations = [];
 
               data.forEach(file => {
-                errors += file.errorCount || 0;
+                totalErrors += file.errorCount || 0;
                 warnings += file.warningCount || 0;
 
                 (file.messages || []).forEach(msg => {
-                  const severity = msg.severity === 2 ? 'error' : 'warning';
                   const line = msg.line || 1;
                   const col = msg.column || 1;
                   const rule = msg.ruleId || 'unknown';
                   const message = (msg.message || '').replace(/'/g, \"'\");
-                  annotations.push({ severity, file: file.filePath, line, col, rule, message });
+
+                  if (msg.severity === 2) {
+                    const hash = computeHash(rule, file.filePath, line);
+                    const isBaseline = baselineHashes.has(hash);
+
+                    const annotation = { severity: 'error', file: file.filePath, line, col, rule, message, isBaseline };
+
+                    if (isBaseline) {
+                      existingErrors++;
+                      existingAnnotations.push(annotation);
+                    } else {
+                      newErrors++;
+                      newAnnotations.push(annotation);
+                    }
+                  } else {
+                    // Warnings are always new (not tracked in baseline)
+                    newAnnotations.push({ severity: 'warning', file: file.filePath, line, col, rule, message, isBaseline: false });
+                  }
                 });
               });
 
-              console.log(JSON.stringify({ errors, warnings, annotations }));
+              console.log(JSON.stringify({
+                totalErrors,
+                warnings,
+                newErrors,
+                existingErrors,
+                newAnnotations,
+                existingAnnotations
+              }));
             ")
 
-            ERROR_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).errors)")
+            ERROR_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).totalErrors)")
             WARNING_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).warnings)")
+            NEW_ERRORS=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).newErrors)")
+            EXISTING_ERRORS=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).existingErrors)")
 
-            # Emit GitHub annotations
+            # Emit GitHub annotations only for NEW errors (blocking)
             echo "$PARSED" | node -e "
               const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-              data.annotations.forEach(a => {
+              data.newAnnotations.forEach(a => {
                 console.log('::' + a.severity + ' file=' + a.file + ',line=' + a.line + ',col=' + a.col + ',title=ESLint ' + a.rule + '::' + a.message);
               });
             "
@@ -793,51 +1412,115 @@ jobs:
             echo "eslint_status=failed" >> $GITHUB_OUTPUT
             echo "eslint_errors=0" >> $GITHUB_OUTPUT
             echo "eslint_warnings=0" >> $GITHUB_OUTPUT
+            echo "eslint_new_errors=0" >> $GITHUB_OUTPUT
+            echo "eslint_existing_errors=0" >> $GITHUB_OUTPUT
             exit 1
           fi
 
-          # Summary table
+          # Summary table with baseline info
           echo "### Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Type | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Errors | $ERROR_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| New Errors | $NEW_ERRORS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Existing Errors (baseline) | $EXISTING_ERRORS |" >> $GITHUB_STEP_SUMMARY
           echo "| Warnings | $WARNING_COUNT |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Store counts for future gates
           echo "eslint_errors=$ERROR_COUNT" >> $GITHUB_OUTPUT
           echo "eslint_warnings=$WARNING_COUNT" >> $GITHUB_OUTPUT
+          echo "eslint_new_errors=$NEW_ERRORS" >> $GITHUB_OUTPUT
+          echo "eslint_existing_errors=$EXISTING_ERRORS" >> $GITHUB_OUTPUT
 
-          # Handle results
-          if [ "$ERROR_COUNT" -gt 0 ]; then
-            echo ":x: **Failed** — $ERROR_COUNT error(s), $WARNING_COUNT warning(s)" >> $GITHUB_STEP_SUMMARY
+          # Handle results - only NEW errors block merge
+          if [ "$NEW_ERRORS" -gt 0 ]; then
+            echo ":x: **Failed** — $NEW_ERRORS NEW error(s)" >> $GITHUB_STEP_SUMMARY
+            if [ "$EXISTING_ERRORS" -gt 0 ]; then
+              echo ":white_circle: **Existing** — $EXISTING_ERRORS error(s) in baseline" >> $GITHUB_STEP_SUMMARY
+            fi
             echo "eslint_status=failed" >> $GITHUB_OUTPUT
 
-            # Show detailed errors in summary
+            # Show NEW errors in summary
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Errors" >> $GITHUB_STEP_SUMMARY
+            echo "### New Errors (blocking)" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "$ESLINT_OUTPUT" | node -e "
+            echo "$PARSED" | node -e "
               const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-              data.forEach(file => {
-                const errors = (file.messages || []).filter(m => m.severity === 2);
-                if (errors.length > 0) {
-                  console.log('**' + file.filePath + '** (' + errors.length + ' error(s))');
-                  errors.forEach(e => {
-                    console.log('- Line ' + e.line + ':' + e.column + ' — ' + e.message + ' (\`' + e.ruleId + '\`)');
-                  });
-                  console.log('');
-                }
+              const byFile = {};
+              data.newAnnotations.filter(a => a.severity === 'error').forEach(a => {
+                if (!byFile[a.file]) byFile[a.file] = [];
+                byFile[a.file].push(a);
+              });
+              Object.entries(byFile).forEach(([file, errors]) => {
+                console.log('**' + file + '** (' + errors.length + ' error(s))');
+                errors.forEach(e => {
+                  console.log('- Line ' + e.line + ':' + e.col + ' — ' + e.message + ' (\`' + e.rule + '\`)');
+                });
+                console.log('');
               });
             " >> $GITHUB_STEP_SUMMARY
 
+            # Show existing errors in collapsible section
+            if [ "$EXISTING_ERRORS" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Existing Errors (in baseline, not blocking)</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "$PARSED" | node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                const byFile = {};
+                data.existingAnnotations.forEach(a => {
+                  if (!byFile[a.file]) byFile[a.file] = [];
+                  byFile[a.file].push(a);
+                });
+                Object.entries(byFile).forEach(([file, errors]) => {
+                  console.log('**' + file + '** (' + errors.length + ' error(s))');
+                  errors.forEach(e => {
+                    console.log('- Line ' + e.line + ':' + e.col + ' — ' + e.message + ' (\`' + e.rule + '\`)');
+                  });
+                  console.log('');
+                });
+              " >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+
             echo ""
-            echo "ESLint failed: $ERROR_COUNT error(s), $WARNING_COUNT warning(s)"
+            echo "ESLint failed: $NEW_ERRORS NEW error(s), $EXISTING_ERRORS existing, $WARNING_COUNT warning(s)"
             exit 1
           fi
 
-          if [ "$WARNING_COUNT" -gt 0 ]; then
+          # Only existing errors - pass (baseline mode)
+          if [ "$EXISTING_ERRORS" -gt 0 ]; then
+            echo ":white_check_mark: **Passed** — No NEW errors" >> $GITHUB_STEP_SUMMARY
+            echo ":white_circle: **Existing** — $EXISTING_ERRORS error(s) in baseline (not blocking)" >> $GITHUB_STEP_SUMMARY
+            echo "eslint_status=passed" >> $GITHUB_OUTPUT
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Existing Errors (in baseline)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "$PARSED" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              const byFile = {};
+              data.existingAnnotations.forEach(a => {
+                if (!byFile[a.file]) byFile[a.file] = [];
+                byFile[a.file].push(a);
+              });
+              Object.entries(byFile).forEach(([file, errors]) => {
+                console.log('**' + file + '** (' + errors.length + ' error(s))');
+                errors.forEach(e => {
+                  console.log('- Line ' + e.line + ':' + e.col + ' — ' + e.message + ' (\`' + e.rule + '\`)');
+                });
+                console.log('');
+              });
+            " >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Run \`hawky baseline --update\` to refresh the baseline after fixing issues._" >> $GITHUB_STEP_SUMMARY
+
+            echo "ESLint passed — $EXISTING_ERRORS existing error(s) in baseline"
+          elif [ "$WARNING_COUNT" -gt 0 ]; then
             echo ":white_check_mark: **Passed** — $WARNING_COUNT warning(s) (non-blocking)" >> $GITHUB_STEP_SUMMARY
             echo "::warning::ESLint completed with $WARNING_COUNT warning(s)"
             echo "eslint_status=passed" >> $GITHUB_OUTPUT
@@ -847,17 +1530,19 @@ jobs:
             echo "<details>" >> $GITHUB_STEP_SUMMARY
             echo "<summary>Warnings ($WARNING_COUNT)</summary>" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "$ESLINT_OUTPUT" | node -e "
+            echo "$PARSED" | node -e "
               const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-              data.forEach(file => {
-                const warnings = (file.messages || []).filter(m => m.severity === 1);
-                if (warnings.length > 0) {
-                  console.log('**' + file.filePath + '** (' + warnings.length + ' warning(s))');
-                  warnings.forEach(w => {
-                    console.log('- Line ' + w.line + ':' + w.column + ' — ' + w.message + ' (\`' + w.ruleId + '\`)');
-                  });
-                  console.log('');
-                }
+              const byFile = {};
+              data.newAnnotations.filter(a => a.severity === 'warning').forEach(a => {
+                if (!byFile[a.file]) byFile[a.file] = [];
+                byFile[a.file].push(a);
+              });
+              Object.entries(byFile).forEach(([file, warnings]) => {
+                console.log('**' + file + '** (' + warnings.length + ' warning(s))');
+                warnings.forEach(w => {
+                  console.log('- Line ' + w.line + ':' + w.col + ' — ' + w.message + ' (\`' + w.rule + '\`)');
+                });
+                console.log('');
               });
             " >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
@@ -872,6 +1557,7 @@ jobs:
       # S009: Semgrep Security Scanning Gate
       # Runs Semgrep on changed files with security rulesets
       # Respects HAWKY_GATE_SEMGREP_ENABLED and blocking configs
+      # S081: Baseline comparison - only NEW high-severity findings block merge
       - name: Semgrep Security Gate
         id: semgrep
         if: ${{ env.HAWKY_GATE_SEMGREP_ENABLED != 'false' && ((steps.typecheck.outputs.tsc_status != 'failed' || env.HAWKY_GATE_TYPESCRIPT_BLOCKING != 'true') && (steps.build.outputs.build_status != 'failed' || env.HAWKY_GATE_BUILD_BLOCKING != 'true') && (steps.test.outputs.test_status != 'failed' || env.HAWKY_GATE_TEST_BLOCKING != 'true') && (steps.eslint.outputs.eslint_status != 'failed' || env.HAWKY_GATE_ESLINT_BLOCKING != 'true') || env.HAWKY_FAIL_FAST != 'true') }}
@@ -900,6 +1586,8 @@ jobs:
             echo "semgrep_high=0" >> $GITHUB_OUTPUT
             echo "semgrep_medium=0" >> $GITHUB_OUTPUT
             echo "semgrep_low=0" >> $GITHUB_OUTPUT
+            echo "semgrep_new_high=0" >> $GITHUB_OUTPUT
+            echo "semgrep_existing_high=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -918,6 +1606,8 @@ jobs:
             echo "semgrep_high=0" >> $GITHUB_OUTPUT
             echo "semgrep_medium=0" >> $GITHUB_OUTPUT
             echo "semgrep_low=0" >> $GITHUB_OUTPUT
+            echo "semgrep_new_high=0" >> $GITHUB_OUTPUT
+            echo "semgrep_existing_high=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -942,6 +1632,8 @@ jobs:
             echo "semgrep_high=0" >> $GITHUB_OUTPUT
             echo "semgrep_medium=0" >> $GITHUB_OUTPUT
             echo "semgrep_low=0" >> $GITHUB_OUTPUT
+            echo "semgrep_new_high=0" >> $GITHUB_OUTPUT
+            echo "semgrep_existing_high=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -971,20 +1663,49 @@ jobs:
           # Output scan time for summary
           echo "semgrep_time=${SEMGREP_TIME}s" >> $GITHUB_OUTPUT
 
-          # Parse JSON output
+          # Parse JSON output with S081 baseline comparison
           # Semgrep JSON format: { results: [{ check_id, path, start: {line, col}, extra: {severity, message} }], errors: [] }
           HIGH_COUNT=0
           MEDIUM_COUNT=0
           LOW_COUNT=0
           INFO_COUNT=0
+          NEW_HIGH=0
+          EXISTING_HIGH=0
 
           # Check if output is valid JSON
           if echo "$SEMGREP_OUTPUT" | node -e "JSON.parse(require('fs').readFileSync(0, 'utf8'))" 2>/dev/null; then
-            # Parse with Node.js for reliable JSON handling
+            # S081: Parse with baseline check using Node.js
             PARSED=$(echo "$SEMGREP_OUTPUT" | node -e "
-              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              const crypto = require('crypto');
+              const fs = require('fs');
+
+              // Load baseline hashes
+              const baselineHashes = new Set(JSON.parse(fs.readFileSync('/tmp/baseline_hashes.json', 'utf8')));
+
+              // Compute hash for violation
+              function computeHash(ruleId, filePath, lineNum) {
+                try {
+                  if (!fs.existsSync(filePath)) {
+                    return crypto.createHash('sha256').update('no-file:semgrep:' + ruleId + ':' + filePath + ':' + lineNum).digest('hex');
+                  }
+                  const content = fs.readFileSync(filePath, 'utf8').split('\n');
+                  const startLine = Math.max(0, lineNum - 3);
+                  const endLine = Math.min(content.length, lineNum + 2);
+                  const context = content.slice(startLine, endLine)
+                    .map(line => line.trim().replace(/\s+/g, ' '))
+                    .join(' ')
+                    .trim();
+                  return crypto.createHash('sha256').update('semgrep:' + ruleId + ':' + context).digest('hex');
+                } catch (e) {
+                  return crypto.createHash('sha256').update('error:semgrep:' + ruleId + ':' + filePath + ':' + lineNum).digest('hex');
+                }
+              }
+
+              const data = JSON.parse(fs.readFileSync(0, 'utf8'));
               let high = 0, medium = 0, low = 0, info = 0;
-              const annotations = [];
+              let newHigh = 0, existingHigh = 0;
+              const newAnnotations = [];
+              const existingAnnotations = [];
 
               (data.results || []).forEach(result => {
                 const severity = (result.extra?.severity || 'INFO').toUpperCase();
@@ -1002,22 +1723,38 @@ jobs:
 
                 // Map severity to annotation type
                 const annotationType = (severity === 'ERROR' || severity === 'HIGH') ? 'error' : 'warning';
+                const annotation = { severity: annotationType, file, line, col, ruleId, message, originalSeverity: severity };
 
-                annotations.push({ severity: annotationType, file, line, col, ruleId, message, originalSeverity: severity });
+                // Check baseline for high-severity findings
+                if (severity === 'ERROR' || severity === 'HIGH') {
+                  const hash = computeHash(ruleId, file, line);
+                  if (baselineHashes.has(hash)) {
+                    existingHigh++;
+                    existingAnnotations.push(annotation);
+                  } else {
+                    newHigh++;
+                    newAnnotations.push(annotation);
+                  }
+                } else {
+                  // Non-high-severity findings are informational
+                  newAnnotations.push(annotation);
+                }
               });
 
-              console.log(JSON.stringify({ high, medium, low, info, annotations }));
+              console.log(JSON.stringify({ high, medium, low, info, newHigh, existingHigh, newAnnotations, existingAnnotations }));
             ")
 
             HIGH_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).high)")
             MEDIUM_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).medium)")
             LOW_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).low)")
             INFO_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).info)")
+            NEW_HIGH=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).newHigh)")
+            EXISTING_HIGH=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).existingHigh)")
 
-            # Emit GitHub annotations
+            # Emit GitHub annotations only for NEW high-severity findings
             echo "$PARSED" | node -e "
               const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-              data.annotations.forEach(a => {
+              data.newAnnotations.forEach(a => {
                 console.log('::' + a.severity + ' file=' + a.file + ',line=' + a.line + ',col=' + a.col + ',title=Semgrep [' + a.originalSeverity + '] ' + a.ruleId + '::' + a.message);
               });
             "
@@ -1036,20 +1773,22 @@ jobs:
             echo "semgrep_high=0" >> $GITHUB_OUTPUT
             echo "semgrep_medium=0" >> $GITHUB_OUTPUT
             echo "semgrep_low=0" >> $GITHUB_OUTPUT
+            echo "semgrep_new_high=0" >> $GITHUB_OUTPUT
+            echo "semgrep_existing_high=0" >> $GITHUB_OUTPUT
             exit 1
           fi
 
           TOTAL_FINDINGS=$((HIGH_COUNT + MEDIUM_COUNT + LOW_COUNT + INFO_COUNT))
 
-          # Summary table
+          # Summary table with baseline info
           echo "### Security Findings" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| :red_circle: High/Error | $HIGH_COUNT |" >> $GITHUB_STEP_SUMMARY
-          echo "| :orange_circle: Medium/Warning | $MEDIUM_COUNT |" >> $GITHUB_STEP_SUMMARY
-          echo "| :yellow_circle: Low | $LOW_COUNT |" >> $GITHUB_STEP_SUMMARY
-          echo "| :white_circle: Info | $INFO_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | New | Existing | Total |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-----|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| :red_circle: High/Error | $NEW_HIGH | $EXISTING_HIGH | $HIGH_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| :orange_circle: Medium/Warning | - | - | $MEDIUM_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| :yellow_circle: Low | - | - | $LOW_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| :white_circle: Info | - | - | $INFO_COUNT |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Store counts for future gates
@@ -1057,34 +1796,76 @@ jobs:
           echo "semgrep_medium=$MEDIUM_COUNT" >> $GITHUB_OUTPUT
           echo "semgrep_low=$LOW_COUNT" >> $GITHUB_OUTPUT
           echo "semgrep_info=$INFO_COUNT" >> $GITHUB_OUTPUT
+          echo "semgrep_new_high=$NEW_HIGH" >> $GITHUB_OUTPUT
+          echo "semgrep_existing_high=$EXISTING_HIGH" >> $GITHUB_OUTPUT
 
-          # Handle results - high severity findings block merge
-          if [ "$HIGH_COUNT" -gt 0 ]; then
-            echo ":x: **Failed** — $HIGH_COUNT high-severity finding(s)" >> $GITHUB_STEP_SUMMARY
+          # Handle results - only NEW high severity findings block merge
+          if [ "$NEW_HIGH" -gt 0 ]; then
+            echo ":x: **Failed** — $NEW_HIGH NEW high-severity finding(s)" >> $GITHUB_STEP_SUMMARY
+            if [ "$EXISTING_HIGH" -gt 0 ]; then
+              echo ":white_circle: **Existing** — $EXISTING_HIGH high-severity finding(s) in baseline" >> $GITHUB_STEP_SUMMARY
+            fi
             echo "semgrep_status=failed" >> $GITHUB_OUTPUT
 
-            # Show detailed findings in summary
+            # Show NEW high-severity findings
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### High-Severity Findings" >> $GITHUB_STEP_SUMMARY
+            echo "### New High-Severity Findings (blocking)" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "$SEMGREP_OUTPUT" | node -e "
+            echo "$PARSED" | node -e "
               const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-              (data.results || []).forEach(result => {
-                const severity = (result.extra?.severity || 'INFO').toUpperCase();
-                if (severity === 'ERROR' || severity === 'HIGH') {
-                  console.log('**' + result.path + ':' + (result.start?.line || 1) + '** — ' + result.check_id);
-                  console.log('  ' + (result.extra?.message || 'Security finding').substring(0, 200));
-                  console.log('');
-                }
+              data.newAnnotations.filter(a => a.originalSeverity === 'HIGH' || a.originalSeverity === 'ERROR').forEach(a => {
+                console.log('**' + a.file + ':' + a.line + '** — ' + a.ruleId);
+                console.log('  ' + a.message.substring(0, 200));
+                console.log('');
               });
             " >> $GITHUB_STEP_SUMMARY
 
+            # Show existing high-severity findings in collapsible
+            if [ "$EXISTING_HIGH" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Existing High-Severity Findings (in baseline, not blocking)</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "$PARSED" | node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                data.existingAnnotations.forEach(a => {
+                  console.log('**' + a.file + ':' + a.line + '** — ' + a.ruleId);
+                  console.log('  ' + a.message.substring(0, 200));
+                  console.log('');
+                });
+              " >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+
             echo ""
-            echo "Semgrep failed: $HIGH_COUNT high-severity finding(s)"
+            echo "Semgrep failed: $NEW_HIGH NEW high-severity finding(s), $EXISTING_HIGH existing"
             exit 1
           fi
 
-          if [ "$MEDIUM_COUNT" -gt 0 ]; then
+          # Only existing high-severity findings - pass (baseline mode)
+          if [ "$EXISTING_HIGH" -gt 0 ]; then
+            echo ":white_check_mark: **Passed** — No NEW high-severity findings" >> $GITHUB_STEP_SUMMARY
+            echo ":white_circle: **Existing** — $EXISTING_HIGH high-severity finding(s) in baseline (not blocking)" >> $GITHUB_STEP_SUMMARY
+            echo "semgrep_status=passed" >> $GITHUB_OUTPUT
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Existing High-Severity Findings (in baseline)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "$PARSED" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              data.existingAnnotations.forEach(a => {
+                console.log('**' + a.file + ':' + a.line + '** — ' + a.ruleId);
+                console.log('  ' + a.message.substring(0, 200));
+                console.log('');
+              });
+            " >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Run \`hawky baseline --update\` to refresh the baseline after fixing issues._" >> $GITHUB_STEP_SUMMARY
+
+            echo "Semgrep passed — $EXISTING_HIGH existing high-severity finding(s) in baseline"
+          elif [ "$MEDIUM_COUNT" -gt 0 ]; then
             echo ":white_check_mark: **Passed** — $MEDIUM_COUNT medium-severity finding(s) (warnings)" >> $GITHUB_STEP_SUMMARY
             echo "::warning::Semgrep found $MEDIUM_COUNT medium-severity finding(s)"
             echo "semgrep_status=passed" >> $GITHUB_OUTPUT
@@ -1094,15 +1875,12 @@ jobs:
             echo "<details>" >> $GITHUB_STEP_SUMMARY
             echo "<summary>Medium-Severity Findings ($MEDIUM_COUNT)</summary>" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "$SEMGREP_OUTPUT" | node -e "
+            echo "$PARSED" | node -e "
               const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-              (data.results || []).forEach(result => {
-                const severity = (result.extra?.severity || 'INFO').toUpperCase();
-                if (severity === 'WARNING' || severity === 'MEDIUM') {
-                  console.log('**' + result.path + ':' + (result.start?.line || 1) + '** — ' + result.check_id);
-                  console.log('  ' + (result.extra?.message || 'Security finding').substring(0, 200));
-                  console.log('');
-                }
+              data.newAnnotations.filter(a => a.originalSeverity === 'MEDIUM' || a.originalSeverity === 'WARNING').forEach(a => {
+                console.log('**' + a.file + ':' + a.line + '** — ' + a.ruleId);
+                console.log('  ' + a.message.substring(0, 200));
+                console.log('');
               });
             " >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
@@ -1117,15 +1895,12 @@ jobs:
             echo "<details>" >> $GITHUB_STEP_SUMMARY
             echo "<summary>Low/Info Findings ($((LOW_COUNT + INFO_COUNT)))</summary>" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "$SEMGREP_OUTPUT" | node -e "
+            echo "$PARSED" | node -e "
               const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-              (data.results || []).forEach(result => {
-                const severity = (result.extra?.severity || 'INFO').toUpperCase();
-                if (severity === 'LOW' || severity === 'INFO') {
-                  console.log('**' + result.path + ':' + (result.start?.line || 1) + '** — ' + result.check_id);
-                  console.log('  ' + (result.extra?.message || 'Security finding').substring(0, 200));
-                  console.log('');
-                }
+              data.newAnnotations.filter(a => a.originalSeverity === 'LOW' || a.originalSeverity === 'INFO').forEach(a => {
+                console.log('**' + a.file + ':' + a.line + '** — ' + a.ruleId);
+                console.log('  ' + a.message.substring(0, 200));
+                console.log('');
               });
             " >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
@@ -1140,6 +1915,7 @@ jobs:
       # S015: Gitleaks Secret Scanning Gate
       # Scans for hardcoded secrets in changed files
       # Respects HAWKY_GATE_GITLEAKS_ENABLED and blocking configs
+      # S081: Note - Secrets are generally NOT included in baseline (security risk)
       - name: Gitleaks Secret Scanning Gate
         id: gitleaks
         if: ${{ env.HAWKY_GATE_GITLEAKS_ENABLED != 'false' && ((steps.typecheck.outputs.tsc_status != 'failed' || env.HAWKY_GATE_TYPESCRIPT_BLOCKING != 'true') && (steps.build.outputs.build_status != 'failed' || env.HAWKY_GATE_BUILD_BLOCKING != 'true') && (steps.test.outputs.test_status != 'failed' || env.HAWKY_GATE_TEST_BLOCKING != 'true') && (steps.eslint.outputs.eslint_status != 'failed' || env.HAWKY_GATE_ESLINT_BLOCKING != 'true') && (steps.semgrep.outputs.semgrep_status != 'failed' || env.HAWKY_GATE_SEMGREP_BLOCKING != 'true') || env.HAWKY_FAIL_FAST != 'true') }}
@@ -1334,12 +2110,16 @@ jobs:
       # Posts/updates a PR comment with aggregated gate results
       # S007: Now includes fail-fast skip detection
       # S008: Now includes disabled gate detection from .hawky.yml config
+      # S081: Now includes baseline comparison (new vs existing violations)
       - name: Gate Report Summary
         id: report
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           FAIL_FAST_ENABLED: ${{ env.HAWKY_FAIL_FAST }}
+          # S081: Baseline info
+          BASELINE_FOUND: ${{ steps.baseline.outputs.baseline_found || 'false' }}
+          BASELINE_COUNT: ${{ steps.baseline.outputs.baseline_count || '0' }}
           # S008: Gate enabled/blocking config
           TSC_ENABLED: ${{ env.HAWKY_GATE_TYPESCRIPT_ENABLED }}
           TSC_BLOCKING: ${{ env.HAWKY_GATE_TYPESCRIPT_BLOCKING }}
@@ -1355,6 +2135,8 @@ jobs:
           # Gate outputs
           TSC_STATUS: ${{ steps.typecheck.outputs.tsc_status || 'unknown' }}
           TSC_ERRORS: ${{ steps.typecheck.outputs.tsc_errors || '0' }}
+          TSC_NEW_ERRORS: ${{ steps.typecheck.outputs.tsc_new_errors || '0' }}
+          TSC_EXISTING_ERRORS: ${{ steps.typecheck.outputs.tsc_existing_errors || '0' }}
           TSC_TIME: ${{ steps.typecheck.outputs.tsc_time || 'N/A' }}
           BUILD_STATUS: ${{ steps.build.outputs.build_status || 'unknown' }}
           BUILD_WARNINGS: ${{ steps.build.outputs.build_warnings || '0' }}
@@ -1369,12 +2151,16 @@ jobs:
           TEST_STEP_RAN: ${{ steps.test.outcome != 'skipped' }}
           ESLINT_STATUS: ${{ steps.eslint.outputs.eslint_status || 'unknown' }}
           ESLINT_ERRORS: ${{ steps.eslint.outputs.eslint_errors || '0' }}
+          ESLINT_NEW_ERRORS: ${{ steps.eslint.outputs.eslint_new_errors || '0' }}
+          ESLINT_EXISTING_ERRORS: ${{ steps.eslint.outputs.eslint_existing_errors || '0' }}
           ESLINT_WARNINGS: ${{ steps.eslint.outputs.eslint_warnings || '0' }}
           ESLINT_TIME: ${{ steps.eslint.outputs.eslint_time || 'N/A' }}
           ESLINT_STEP_RAN: ${{ steps.eslint.outcome != 'skipped' }}
           # S009: Semgrep outputs
           SEMGREP_STATUS: ${{ steps.semgrep.outputs.semgrep_status || 'unknown' }}
           SEMGREP_HIGH: ${{ steps.semgrep.outputs.semgrep_high || '0' }}
+          SEMGREP_NEW_HIGH: ${{ steps.semgrep.outputs.semgrep_new_high || '0' }}
+          SEMGREP_EXISTING_HIGH: ${{ steps.semgrep.outputs.semgrep_existing_high || '0' }}
           SEMGREP_MEDIUM: ${{ steps.semgrep.outputs.semgrep_medium || '0' }}
           SEMGREP_LOW: ${{ steps.semgrep.outputs.semgrep_low || '0' }}
           SEMGREP_TIME: ${{ steps.semgrep.outputs.semgrep_time || 'N/A' }}
@@ -1514,16 +2300,44 @@ jobs:
           echo "$BADGE" >> /tmp/hawky-comment.md
           echo "" >> /tmp/hawky-comment.md
 
-          # Add table header
-          echo "| Gate | Status | Details | Time |" >> /tmp/hawky-comment.md
-          echo "|------|--------|---------|------|" >> /tmp/hawky-comment.md
+          # S081: Show baseline info if present
+          if [ "$BASELINE_FOUND" = "true" ]; then
+            echo ":bookmark: **Baseline active** — $BASELINE_COUNT existing violation(s) excluded" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+          fi
 
-          echo "| TypeScript | $(status_icon "$TSC_STATUS") $TSC_STATUS | ${TSC_ERRORS} error(s) | $TSC_TIME |" >> /tmp/hawky-comment.md
-          echo "| Build | $(status_icon "$BUILD_STATUS") $BUILD_STATUS | ${BUILD_WARNINGS} warning(s) | $BUILD_TIME |" >> /tmp/hawky-comment.md
-          echo "| Test | $(status_icon "$TEST_STATUS") $TEST_STATUS | ${TEST_PASSED}/${TEST_TOTAL} passed, ${TEST_FAILED} failed | $TEST_TIME |" >> /tmp/hawky-comment.md
-          echo "| ESLint | $(status_icon "$ESLINT_STATUS") $ESLINT_STATUS | ${ESLINT_ERRORS} error(s), ${ESLINT_WARNINGS} warning(s) | $ESLINT_TIME |" >> /tmp/hawky-comment.md
-          echo "| Semgrep | $(status_icon "$SEMGREP_STATUS") $SEMGREP_STATUS | ${SEMGREP_HIGH} high, ${SEMGREP_MEDIUM} medium, ${SEMGREP_LOW} low | $SEMGREP_TIME |" >> /tmp/hawky-comment.md
-          echo "| Gitleaks | $(status_icon "$GITLEAKS_STATUS") $GITLEAKS_STATUS | ${GITLEAKS_SECRETS} secret(s) | $GITLEAKS_TIME |" >> /tmp/hawky-comment.md
+          # Add table header with baseline columns
+          echo "| Gate | Status | New | Existing | Time |" >> /tmp/hawky-comment.md
+          echo "|------|--------|-----|----------|------|" >> /tmp/hawky-comment.md
+
+          # S081: Show new vs existing for gates with baseline support
+          TSC_DETAILS="${TSC_NEW_ERRORS} error(s)"
+          if [ "$TSC_EXISTING_ERRORS" -gt 0 ]; then
+            TSC_EXISTING_DISPLAY="$TSC_EXISTING_ERRORS"
+          else
+            TSC_EXISTING_DISPLAY="-"
+          fi
+
+          ESLINT_DETAILS="${ESLINT_NEW_ERRORS} error(s)"
+          if [ "$ESLINT_EXISTING_ERRORS" -gt 0 ]; then
+            ESLINT_EXISTING_DISPLAY="$ESLINT_EXISTING_ERRORS"
+          else
+            ESLINT_EXISTING_DISPLAY="-"
+          fi
+
+          SEMGREP_DETAILS="${SEMGREP_NEW_HIGH} high"
+          if [ "$SEMGREP_EXISTING_HIGH" -gt 0 ]; then
+            SEMGREP_EXISTING_DISPLAY="$SEMGREP_EXISTING_HIGH"
+          else
+            SEMGREP_EXISTING_DISPLAY="-"
+          fi
+
+          echo "| TypeScript | $(status_icon "$TSC_STATUS") $TSC_STATUS | $TSC_DETAILS | $TSC_EXISTING_DISPLAY | $TSC_TIME |" >> /tmp/hawky-comment.md
+          echo "| Build | $(status_icon "$BUILD_STATUS") $BUILD_STATUS | ${BUILD_WARNINGS} warn | - | $BUILD_TIME |" >> /tmp/hawky-comment.md
+          echo "| Test | $(status_icon "$TEST_STATUS") $TEST_STATUS | ${TEST_FAILED} failed | - | $TEST_TIME |" >> /tmp/hawky-comment.md
+          echo "| ESLint | $(status_icon "$ESLINT_STATUS") $ESLINT_STATUS | $ESLINT_DETAILS | $ESLINT_EXISTING_DISPLAY | $ESLINT_TIME |" >> /tmp/hawky-comment.md
+          echo "| Semgrep | $(status_icon "$SEMGREP_STATUS") $SEMGREP_STATUS | $SEMGREP_DETAILS | $SEMGREP_EXISTING_DISPLAY | $SEMGREP_TIME |" >> /tmp/hawky-comment.md
+          echo "| Gitleaks | $(status_icon "$GITLEAKS_STATUS") $GITLEAKS_STATUS | ${GITLEAKS_SECRETS} secret(s) | - | $GITLEAKS_TIME |" >> /tmp/hawky-comment.md
           echo "" >> /tmp/hawky-comment.md
 
           # Add details sections for failures

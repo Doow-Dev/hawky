@@ -67,3 +67,22 @@ gates:
 # gates:
 #   test:
 #     command: "npm run test:ci -- --coverage"
+
+# ==============================================================================
+# Baseline Mode (S081)
+# ==============================================================================
+# Hawky supports baseline mode for repos with existing tech debt.
+# Only NEW violations (not in baseline) will block merge.
+#
+# To generate a baseline:
+#   1. Go to Actions > Hawky Code Review > Run workflow
+#   2. Select mode: "baseline" or "baseline-update"
+#   3. Enter branch name (default: main)
+#   4. Run - baseline will be saved to .hawky/baseline.json
+#
+# Baseline file is committed to your repo and should be versioned.
+# Each violation is identified by a content hash (not line number),
+# so violations remain tracked even if code moves around.
+#
+# To update the baseline after fixing issues:
+#   Run workflow with mode: "baseline-update"
