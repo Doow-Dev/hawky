@@ -36,3 +36,7 @@ export {
   partitionViolations,
   createMatcher,
 } from './matcher';
+
+// Generator (for baseline mode)
+export type { GeneratorOptions, GeneratorResult } from './generator';
+export { generateBaseline, generateBaselineFromCwd } from './generator';

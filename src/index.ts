@@ -11,6 +11,7 @@ import {
   loadBaselineFromCwd,
   getViolationCounts,
   isExistingViolation,
+  generateBaselineFromCwd,
   type Baseline,
   type BaselineLoadResult,
 } from './baseline';
@@ -42,26 +43,41 @@ import {
 } from './report';
 
 /**
+ * Operating mode for Hawky
+ */
+type HawkyMode = 'check' | 'baseline';
+
+/**
  * Parsed action inputs
  */
 interface HawkyInputs {
+  mode: HawkyMode;
   failFast: boolean;
   gates: string[];
   configPath: string;
   githubToken: string;
+  commitBaseline: boolean;
 }
 
 /**
  * Read and parse action inputs from workflow
  */
 function getInputs(): HawkyInputs {
+  const modeRaw = core.getInput('mode', { required: false }) || 'check';
   const failFastRaw = core.getInput('fail_fast', { required: false });
   const gatesRaw = core.getInput('gates', { required: false });
   const configPath = core.getInput('config_path', { required: false });
   const githubToken = core.getInput('github_token', { required: false });
+  const commitBaselineRaw = core.getInput('commit_baseline', { required: false });
+
+  // Parse mode (default: check)
+  const mode: HawkyMode = modeRaw.toLowerCase() === 'baseline' ? 'baseline' : 'check';
 
   // Parse fail_fast as boolean (default: true)
   const failFast = failFastRaw.toLowerCase() !== 'false';
+
+  // Parse commit_baseline as boolean (default: false)
+  const commitBaseline = commitBaselineRaw.toLowerCase() === 'true';
 
   // Parse gates as comma-separated list
   const gates = gatesRaw
@@ -70,10 +86,12 @@ function getInputs(): HawkyInputs {
     .filter((g) => g.length > 0);
 
   return {
+    mode,
     failFast,
     gates,
     configPath: configPath || '.hawky.yml',
     githubToken,
+    commitBaseline,
   };
 }
 
@@ -173,6 +191,64 @@ function logGateResult(result: GateResult): void {
 }
 
 /**
+ * Run baseline generation mode
+ */
+async function runBaselineMode(inputs: HawkyInputs): Promise<void> {
+  core.info('Hawky starting in BASELINE mode...');
+  core.info('This will scan the full repository and generate a baseline.');
+
+  // Load config
+  core.startGroup('Loading Configuration');
+  const configResult = loadConfigFromCwd(inputs.configPath);
+  const config: HawkyConfig = configResult.config;
+
+  if (configResult.configFound) {
+    core.info(`Loaded config from: ${configResult.configPath}`);
+  } else {
+    core.info('No .hawky.yml found — using defaults');
+  }
+
+  // Log any config warnings
+  for (const warning of configResult.warnings) {
+    core.warning(`Config warning [${warning.field}]: ${warning.message}`);
+  }
+  core.endGroup();
+
+  // Generate baseline
+  core.info('');
+  core.info('Scanning repository for violations...');
+
+  const result = await generateBaselineFromCwd(
+    config,
+    inputs.commitBaseline,
+    inputs.githubToken
+  );
+
+  if (result.success) {
+    core.info('');
+    core.info('='.repeat(50));
+    core.info('Baseline Generation Complete');
+    core.info('='.repeat(50));
+    core.info(`Total violations baselined: ${result.summary.total}`);
+    core.info(`  - TypeScript: ${result.summary.typescript}`);
+    core.info(`  - ESLint: ${result.summary.eslint}`);
+    core.info(`  - Semgrep: ${result.summary.semgrep}`);
+    core.info(`  - Gitleaks: ${result.summary.gitleaks}`);
+    core.info('');
+    core.info(`Files generated:`);
+    core.info(`  - ${result.baselinePath}`);
+    core.info(`  - ${result.reportPath}`);
+
+    // Set outputs
+    core.setOutput('status', 'pass');
+    core.setOutput('baseline_violations', result.summary.total);
+    core.setOutput('baseline_path', result.baselinePath);
+  } else {
+    core.setFailed(`Baseline generation failed: ${result.error}`);
+  }
+}
+
+/**
  * Main action entry point
  */
 async function run(): Promise<void> {
@@ -183,10 +259,18 @@ async function run(): Promise<void> {
     const inputs = getInputs();
 
     core.info(`Configuration:`);
+    core.info(`  - Mode: ${inputs.mode}`);
     core.info(`  - Fail fast: ${inputs.failFast}`);
     core.info(`  - Gates: ${inputs.gates.join(', ')}`);
     core.info(`  - Config path: ${inputs.configPath}`);
 
+    // S106: Check for baseline mode and branch early
+    if (inputs.mode === 'baseline') {
+      await runBaselineMode(inputs);
+      return;
+    }
+
+    // Normal check mode continues below...
     // S097: Load and parse config from configPath
     core.startGroup('Loading Configuration');
     const configResult = loadConfigFromCwd(inputs.configPath);

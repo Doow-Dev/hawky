@@ -29922,6 +29922,405 @@ function wrappy (fn, cb) {
 
 /***/ }),
 
+/***/ 6162:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Baseline Generator
+ *
+ * Scans the FULL repository for violations and generates a baseline file.
+ * This is used during initial onboarding to capture existing technical debt.
+ *
+ * Triggered via workflow_dispatch with mode: baseline
+ *
+ * Outputs:
+ * - .hawky/baseline.json: Violations database with stable hashes
+ * - .hawky/onboarding-report.md: Human-readable summary for team review
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.generateBaseline = generateBaseline;
+exports.generateBaselineFromCwd = generateBaselineFromCwd;
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+const core = __importStar(__nccwpck_require__(7484));
+const exec = __importStar(__nccwpck_require__(5236));
+const hash_1 = __nccwpck_require__(1555);
+const gates_1 = __nccwpck_require__(6620);
+/**
+ * Convert a Violation to a BaselineViolation
+ */
+function violationToBaselineEntry(violation, cwd) {
+    const fullPath = path.join(cwd, violation.file);
+    const hash = (0, hash_1.computeHash)(violation.ruleId, fullPath, violation.line);
+    return {
+        rule: violation.ruleId,
+        file: violation.file,
+        line_hint: violation.line,
+        hash,
+        gate: violation.gate,
+        message: violation.message.substring(0, 200), // Truncate long messages
+        first_seen: new Date().toISOString(),
+    };
+}
+/**
+ * Run a single gate in scan mode (full repo)
+ */
+async function runGateScan(gateName, config, cwd) {
+    const gateConfig = config.gates[gateName];
+    const timeoutMs = gateConfig.timeout * 1000;
+    const options = {
+        cwd,
+        timeoutMs,
+        createAnnotations: false, // No annotations in baseline mode
+    };
+    switch (gateName) {
+        case 'typescript':
+            return gates_1.typescriptGate.run(options);
+        case 'eslint':
+            return gates_1.eslintGate.run(options);
+        case 'semgrep':
+            // Set rulesets from config via environment variable
+            const rulesets = gateConfig.rulesets || 'p/security-audit';
+            process.env['HAWKY_GATE_SEMGREP_RULESETS'] = rulesets;
+            return gates_1.semgrepGate.run(options);
+        case 'gitleaks':
+            return gates_1.gitleaksGate.run(options);
+        default:
+            // Unsupported gates (build, test) return empty results
+            return {
+                gate: gateName,
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: 0,
+                message: `${gateName} gate not supported for baseline generation`,
+            };
+    }
+}
+/**
+ * Generate markdown onboarding report
+ */
+function generateOnboardingReport(baseline, gateResults) {
+    const lines = [];
+    lines.push('# Hawky Onboarding Report');
+    lines.push('');
+    lines.push(`Generated: ${baseline.generated_at}`);
+    lines.push(`Branch: ${baseline.branch}`);
+    lines.push(`Commit: ${baseline.commit}`);
+    lines.push('');
+    // Summary
+    lines.push('## Summary');
+    lines.push('');
+    lines.push(`Total violations baselined: **${baseline.violations.length}**`);
+    lines.push('');
+    if (baseline.summary) {
+        lines.push('| Gate | Violations |');
+        lines.push('|------|------------|');
+        lines.push(`| TypeScript | ${baseline.summary.typescript} |`);
+        lines.push(`| ESLint | ${baseline.summary.eslint} |`);
+        lines.push(`| Semgrep | ${baseline.summary.semgrep} |`);
+        lines.push(`| Gitleaks | ${baseline.summary.gitleaks} |`);
+        lines.push('');
+    }
+    // Gate details
+    lines.push('## Gate Results');
+    lines.push('');
+    for (const result of gateResults) {
+        if (result.status === 'skip')
+            continue;
+        lines.push(`### ${result.gate.charAt(0).toUpperCase() + result.gate.slice(1)}`);
+        lines.push('');
+        lines.push(`- **Status**: ${result.status}`);
+        lines.push(`- **Violations**: ${result.totalViolations}`);
+        lines.push(`- **Time**: ${result.timeMs}ms`);
+        lines.push('');
+        // Top violations by file
+        if (result.violations.length > 0) {
+            const byFile = new Map();
+            for (const v of result.violations) {
+                byFile.set(v.file, (byFile.get(v.file) || 0) + 1);
+            }
+            const topFiles = Array.from(byFile.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5);
+            lines.push('<details>');
+            lines.push(`<summary>Top files with violations (${topFiles.length} shown)</summary>`);
+            lines.push('');
+            lines.push('| File | Count |');
+            lines.push('|------|-------|');
+            for (const [file, count] of topFiles) {
+                lines.push(`| \`${file}\` | ${count} |`);
+            }
+            lines.push('');
+            lines.push('</details>');
+            lines.push('');
+        }
+    }
+    // Security notice for gitleaks
+    const gitleaksResult = gateResults.find(r => r.gate === 'gitleaks');
+    if (gitleaksResult && gitleaksResult.violations.length > 0) {
+        lines.push('## Security Notice');
+        lines.push('');
+        lines.push('> **WARNING**: The baseline includes potential secrets detected by Gitleaks.');
+        lines.push('> These should be rotated immediately, even if they are false positives.');
+        lines.push('> Secrets in baseline are NOT an excuse to ignore them.');
+        lines.push('');
+    }
+    // Next steps
+    lines.push('## Next Steps');
+    lines.push('');
+    lines.push('1. Review this report with your team');
+    lines.push('2. Set a grace period in `.hawky.yml` if needed:');
+    lines.push('   ```yaml');
+    lines.push('   grace_period:');
+    lines.push('     end_date: "2026-03-31"  # Or number of sprints');
+    lines.push('   ```');
+    lines.push('3. Commit the baseline: `git add .hawky/ && git commit -m "chore: add hawky baseline"`');
+    lines.push('4. New PRs will only fail on NEW violations');
+    lines.push('5. Gradually fix baselined violations as you touch those files');
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+    lines.push('*Generated by [Hawky](https://github.com/the-crux-squad/hawky)*');
+    return lines.join('\n');
+}
+/**
+ * Generate baseline by scanning the full repository
+ */
+async function generateBaseline(options) {
+    const { cwd, branch, commit, config } = options;
+    core.info('Starting baseline generation...');
+    core.info(`  Branch: ${branch}`);
+    core.info(`  Commit: ${commit}`);
+    // Initialize result
+    const result = {
+        success: false,
+        baseline: null,
+        baselinePath: null,
+        reportPath: null,
+        summary: {
+            total: 0,
+            typescript: 0,
+            eslint: 0,
+            semgrep: 0,
+            gitleaks: 0,
+        },
+        gateResults: [],
+    };
+    try {
+        // Create .hawky directory if it doesn't exist
+        const hawkyDir = path.join(cwd, '.hawky');
+        if (!fs.existsSync(hawkyDir)) {
+            fs.mkdirSync(hawkyDir, { recursive: true });
+            core.info(`Created directory: ${hawkyDir}`);
+        }
+        // Run all enabled gates
+        const gatesToRun = ['typescript', 'eslint', 'semgrep', 'gitleaks'];
+        const allViolations = [];
+        for (const gateName of gatesToRun) {
+            const gateConfig = config.gates[gateName];
+            // Skip disabled gates
+            if (!gateConfig.enabled) {
+                core.info(`Skipping ${gateName} (disabled in config)`);
+                continue;
+            }
+            core.startGroup(`Scanning with ${gateName}`);
+            const gateResult = await runGateScan(gateName, config, cwd);
+            result.gateResults.push(gateResult);
+            core.info(`  Status: ${gateResult.status}`);
+            core.info(`  Violations: ${gateResult.totalViolations}`);
+            core.info(`  Time: ${gateResult.timeMs}ms`);
+            // Convert violations to baseline entries
+            for (const violation of gateResult.violations) {
+                const entry = violationToBaselineEntry(violation, cwd);
+                allViolations.push(entry);
+                // Update counts
+                result.summary[violation.gate]++;
+            }
+            core.endGroup();
+        }
+        result.summary.total = allViolations.length;
+        // Create baseline object
+        const baseline = {
+            version: '1.0.0',
+            generated_at: new Date().toISOString(),
+            branch,
+            commit,
+            violations: allViolations,
+            summary: {
+                total: result.summary.total,
+                typescript: result.summary.typescript,
+                eslint: result.summary.eslint,
+                semgrep: result.summary.semgrep,
+                gitleaks: result.summary.gitleaks,
+            },
+        };
+        // Write baseline.json
+        const baselinePath = path.join(hawkyDir, 'baseline.json');
+        fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2), 'utf8');
+        core.info(`Wrote baseline: ${baselinePath}`);
+        // Generate and write onboarding report
+        const reportPath = path.join(hawkyDir, 'onboarding-report.md');
+        const report = generateOnboardingReport(baseline, result.gateResults);
+        fs.writeFileSync(reportPath, report, 'utf8');
+        core.info(`Wrote report: ${reportPath}`);
+        // Commit and push if requested
+        if (options.commitAndPush) {
+            core.startGroup('Committing baseline files');
+            try {
+                // Configure git
+                await exec.exec('git', ['config', 'user.name', 'Hawky Bot'], { cwd });
+                await exec.exec('git', ['config', 'user.email', 'hawky@the-crux-squad.com'], { cwd });
+                // Add files
+                await exec.exec('git', ['add', '.hawky/baseline.json', '.hawky/onboarding-report.md'], { cwd });
+                // Commit
+                await exec.exec('git', ['commit', '-m', 'chore: add hawky baseline\n\nGenerated by Hawky baseline mode'], { cwd });
+                // Push (requires token)
+                if (options.githubToken) {
+                    await exec.exec('git', ['push'], {
+                        cwd,
+                        env: {
+                            ...process.env,
+                            GIT_ASKPASS: 'echo',
+                            GIT_TERMINAL_PROMPT: '0',
+                        },
+                    });
+                    core.info('Pushed baseline files to remote');
+                }
+                else {
+                    core.warning('No GitHub token provided, skipping push');
+                }
+            }
+            catch (err) {
+                const errorMessage = err instanceof Error ? err.message : String(err);
+                core.warning(`Failed to commit/push: ${errorMessage}`);
+            }
+            core.endGroup();
+        }
+        // Update result
+        result.success = true;
+        result.baseline = baseline;
+        result.baselinePath = baselinePath;
+        result.reportPath = reportPath;
+        core.info('');
+        core.info('Baseline generation complete!');
+        core.info(`  Total violations: ${result.summary.total}`);
+        core.info(`  TypeScript: ${result.summary.typescript}`);
+        core.info(`  ESLint: ${result.summary.eslint}`);
+        core.info(`  Semgrep: ${result.summary.semgrep}`);
+        core.info(`  Gitleaks: ${result.summary.gitleaks}`);
+        return result;
+    }
+    catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        core.error(`Baseline generation failed: ${errorMessage}`);
+        result.error = errorMessage;
+        return result;
+    }
+}
+/**
+ * Generate baseline with auto-detected branch and commit
+ */
+async function generateBaselineFromCwd(config, commitAndPush, githubToken) {
+    const cwd = process.cwd();
+    // Get current branch
+    let branch = process.env['GITHUB_REF_NAME'] || '';
+    if (!branch) {
+        try {
+            let output = '';
+            await exec.exec('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+                cwd,
+                silent: true,
+                listeners: {
+                    stdout: (data) => {
+                        output += data.toString();
+                    },
+                },
+            });
+            branch = output.trim() || 'unknown';
+        }
+        catch {
+            branch = 'unknown';
+        }
+    }
+    // Get current commit
+    let commit = process.env['GITHUB_SHA'] || '';
+    if (!commit) {
+        try {
+            let output = '';
+            await exec.exec('git', ['rev-parse', 'HEAD'], {
+                cwd,
+                silent: true,
+                listeners: {
+                    stdout: (data) => {
+                        output += data.toString();
+                    },
+                },
+            });
+            commit = output.trim() || 'unknown';
+        }
+        catch {
+            commit = 'unknown';
+        }
+    }
+    const opts = {
+        cwd,
+        branch,
+        commit,
+        config,
+    };
+    // Only set optional properties if defined (for exactOptionalPropertyTypes)
+    if (commitAndPush !== undefined) {
+        opts.commitAndPush = commitAndPush;
+    }
+    if (githubToken !== undefined) {
+        opts.githubToken = githubToken;
+    }
+    return generateBaseline(opts);
+}
+
+
+/***/ }),
+
 /***/ 1555:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -30083,7 +30482,7 @@ function computeHashWithMeta(ruleId, filePath, lineNumber) {
  * Exports all baseline-related functionality.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.createMatcher = exports.partitionViolations = exports.filterNewViolations = exports.matchViolations = exports.isExistingViolation = exports.getViolationCounts = exports.getHashSet = exports.loadBaselineFromCwd = exports.loadBaseline = exports.normalizeContext = exports.extractContext = exports.computeHashWithMeta = exports.computeHash = void 0;
+exports.generateBaselineFromCwd = exports.generateBaseline = exports.createMatcher = exports.partitionViolations = exports.filterNewViolations = exports.matchViolations = exports.isExistingViolation = exports.getViolationCounts = exports.getHashSet = exports.loadBaselineFromCwd = exports.loadBaseline = exports.normalizeContext = exports.extractContext = exports.computeHashWithMeta = exports.computeHash = void 0;
 // Hash computation
 var hash_1 = __nccwpck_require__(1555);
 Object.defineProperty(exports, "computeHash", ({ enumerable: true, get: function () { return hash_1.computeHash; } }));
@@ -30103,6 +30502,9 @@ Object.defineProperty(exports, "matchViolations", ({ enumerable: true, get: func
 Object.defineProperty(exports, "filterNewViolations", ({ enumerable: true, get: function () { return matcher_1.filterNewViolations; } }));
 Object.defineProperty(exports, "partitionViolations", ({ enumerable: true, get: function () { return matcher_1.partitionViolations; } }));
 Object.defineProperty(exports, "createMatcher", ({ enumerable: true, get: function () { return matcher_1.createMatcher; } }));
+var generator_1 = __nccwpck_require__(6162);
+Object.defineProperty(exports, "generateBaseline", ({ enumerable: true, get: function () { return generator_1.generateBaseline; } }));
+Object.defineProperty(exports, "generateBaselineFromCwd", ({ enumerable: true, get: function () { return generator_1.generateBaselineFromCwd; } }));
 
 
 /***/ }),
@@ -33342,22 +33744,30 @@ const report_1 = __nccwpck_require__(1714);
  * Read and parse action inputs from workflow
  */
 function getInputs() {
+    const modeRaw = core.getInput('mode', { required: false }) || 'check';
     const failFastRaw = core.getInput('fail_fast', { required: false });
     const gatesRaw = core.getInput('gates', { required: false });
     const configPath = core.getInput('config_path', { required: false });
     const githubToken = core.getInput('github_token', { required: false });
+    const commitBaselineRaw = core.getInput('commit_baseline', { required: false });
+    // Parse mode (default: check)
+    const mode = modeRaw.toLowerCase() === 'baseline' ? 'baseline' : 'check';
     // Parse fail_fast as boolean (default: true)
     const failFast = failFastRaw.toLowerCase() !== 'false';
+    // Parse commit_baseline as boolean (default: false)
+    const commitBaseline = commitBaselineRaw.toLowerCase() === 'true';
     // Parse gates as comma-separated list
     const gates = gatesRaw
         .split(',')
         .map((g) => g.trim().toLowerCase())
         .filter((g) => g.length > 0);
     return {
+        mode,
         failFast,
         gates,
         configPath: configPath || '.hawky.yml',
         githubToken,
+        commitBaseline,
     };
 }
 /**
@@ -33431,6 +33841,54 @@ function logGateResult(result) {
     }
 }
 /**
+ * Run baseline generation mode
+ */
+async function runBaselineMode(inputs) {
+    core.info('Hawky starting in BASELINE mode...');
+    core.info('This will scan the full repository and generate a baseline.');
+    // Load config
+    core.startGroup('Loading Configuration');
+    const configResult = (0, config_1.loadConfigFromCwd)(inputs.configPath);
+    const config = configResult.config;
+    if (configResult.configFound) {
+        core.info(`Loaded config from: ${configResult.configPath}`);
+    }
+    else {
+        core.info('No .hawky.yml found — using defaults');
+    }
+    // Log any config warnings
+    for (const warning of configResult.warnings) {
+        core.warning(`Config warning [${warning.field}]: ${warning.message}`);
+    }
+    core.endGroup();
+    // Generate baseline
+    core.info('');
+    core.info('Scanning repository for violations...');
+    const result = await (0, baseline_1.generateBaselineFromCwd)(config, inputs.commitBaseline, inputs.githubToken);
+    if (result.success) {
+        core.info('');
+        core.info('='.repeat(50));
+        core.info('Baseline Generation Complete');
+        core.info('='.repeat(50));
+        core.info(`Total violations baselined: ${result.summary.total}`);
+        core.info(`  - TypeScript: ${result.summary.typescript}`);
+        core.info(`  - ESLint: ${result.summary.eslint}`);
+        core.info(`  - Semgrep: ${result.summary.semgrep}`);
+        core.info(`  - Gitleaks: ${result.summary.gitleaks}`);
+        core.info('');
+        core.info(`Files generated:`);
+        core.info(`  - ${result.baselinePath}`);
+        core.info(`  - ${result.reportPath}`);
+        // Set outputs
+        core.setOutput('status', 'pass');
+        core.setOutput('baseline_violations', result.summary.total);
+        core.setOutput('baseline_path', result.baselinePath);
+    }
+    else {
+        core.setFailed(`Baseline generation failed: ${result.error}`);
+    }
+}
+/**
  * Main action entry point
  */
 async function run() {
@@ -33439,9 +33897,16 @@ async function run() {
         // Read inputs
         const inputs = getInputs();
         core.info(`Configuration:`);
+        core.info(`  - Mode: ${inputs.mode}`);
         core.info(`  - Fail fast: ${inputs.failFast}`);
         core.info(`  - Gates: ${inputs.gates.join(', ')}`);
         core.info(`  - Config path: ${inputs.configPath}`);
+        // S106: Check for baseline mode and branch early
+        if (inputs.mode === 'baseline') {
+            await runBaselineMode(inputs);
+            return;
+        }
+        // Normal check mode continues below...
         // S097: Load and parse config from configPath
         core.startGroup('Loading Configuration');
         const configResult = (0, config_1.loadConfigFromCwd)(inputs.configPath);

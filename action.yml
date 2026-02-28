@@ -22,6 +22,11 @@ branding:
   color: 'blue'
 
 inputs:
+  mode:
+    description: 'Operating mode: "check" (default) runs gates on PR, "baseline" generates baseline.json'
+    required: false
+    default: 'check'
+
   fail_fast:
     description: 'Stop running gates after first blocking gate failure'
     required: false
@@ -42,6 +47,11 @@ inputs:
     required: false
     default: ${{ github.token }}
 
+  commit_baseline:
+    description: 'Commit and push baseline files after generation (only for baseline mode)'
+    required: false
+    default: 'false'
+
 outputs:
   status:
     description: 'Overall status (pass/fail)'
@@ -54,6 +64,12 @@ outputs:
 
   report_url:
     description: 'URL to the full report (step summary)'
+
+  baseline_violations:
+    description: 'Total violations in generated baseline (baseline mode only)'
+
+  baseline_path:
+    description: 'Path to generated baseline.json (baseline mode only)'
 
 runs:
   using: 'node20'
