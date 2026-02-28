@@ -1,0 +1,13 @@
+# Test hawkyignore file
+# Used for integration testing
+
+# File patterns
+legacy/**
+*.generated.ts
+
+# Rule patterns
+eslint:no-console
+typescript:TS2322
+
+# Combined patterns
+semgrep:dangerous-rule:test/**
