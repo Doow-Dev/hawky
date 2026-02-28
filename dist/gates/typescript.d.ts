@@ -13,6 +13,7 @@ import type { Gate, Violation, Annotation } from './types';
 export declare function parseTypeScriptOutput(output: string, cwd: string): Violation[];
 /**
  * Convert a violation to a GitHub annotation
+ * Uses the violation's severity if set, otherwise defaults to 'error'
  */
 export declare function violationToAnnotation(violation: Violation): Annotation;
 /**

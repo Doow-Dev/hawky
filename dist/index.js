@@ -26829,6 +26829,7 @@ function parseESLintOutputWithSeverity(output, cwd) {
                     column: msg.column || 1,
                     message: msg.message || '',
                     gate: 'eslint',
+                    severity: msg.severity === 2 ? 'error' : 'warning',
                 };
                 if (msg.severity === 2) {
                     errors.push(violation);
@@ -27247,6 +27248,7 @@ function parseTypeScriptOutput(output, cwd) {
                 column: parseInt(colStr, 10),
                 message: message.trim(),
                 gate: 'typescript',
+                severity: 'error', // TypeScript errors are always blocking
             });
         }
     }
@@ -27254,15 +27256,16 @@ function parseTypeScriptOutput(output, cwd) {
 }
 /**
  * Convert a violation to a GitHub annotation
+ * Uses the violation's severity if set, otherwise defaults to 'error'
  */
 function violationToAnnotation(violation) {
     const annotation = {
         file: violation.file,
         line: violation.line,
         message: violation.message,
-        severity: 'error',
+        severity: violation.severity || 'error',
         ruleId: violation.ruleId,
-        title: `TypeScript ${violation.ruleId}`,
+        title: `${violation.gate === 'eslint' ? 'ESLint' : 'TypeScript'} ${violation.ruleId}`,
     };
     // Only add column if defined
     if (violation.column !== undefined) {
@@ -27977,8 +27980,11 @@ function filterViolations(result, baseline, ignorePatterns, cwd) {
         newViolations.push(violation);
         newAnnotations.push((0, gates_1.violationToAnnotation)(violation));
     }
-    // Determine status based on new violations only
-    const status = newViolations.length > 0 ? 'fail' : 'pass';
+    // Determine status based on new ERROR violations only
+    // Warnings (severity === 'warning') should not block
+    // If severity is undefined (legacy violations), treat as blocking error
+    const hasNewErrors = newViolations.some((v) => v.severity === 'error' || v.severity === undefined);
+    const status = hasNewErrors ? 'fail' : 'pass';
     const message = newViolations.length > 0
         ? `${newViolations.length} new error(s) found (${existingViolations.length} existing, ${ignoredViolations.length} ignored)`
         : existingViolations.length > 0

@@ -144,6 +144,7 @@ export function parseESLintOutputWithSeverity(
           column: msg.column || 1,
           message: msg.message || '',
           gate: 'eslint',
+          severity: msg.severity === 2 ? 'error' : 'warning',
         };
 
         if (msg.severity === 2) {

@@ -113,8 +113,13 @@ function filterViolations(
     newAnnotations.push(violationToAnnotation(violation));
   }
 
-  // Determine status based on new violations only
-  const status = newViolations.length > 0 ? 'fail' : 'pass';
+  // Determine status based on new ERROR violations only
+  // Warnings (severity === 'warning') should not block
+  // If severity is undefined (legacy violations), treat as blocking error
+  const hasNewErrors = newViolations.some(
+    (v) => v.severity === 'error' || v.severity === undefined
+  );
+  const status = hasNewErrors ? 'fail' : 'pass';
   const message =
     newViolations.length > 0
       ? `${newViolations.length} new error(s) found (${existingViolations.length} existing, ${ignoredViolations.length} ignored)`

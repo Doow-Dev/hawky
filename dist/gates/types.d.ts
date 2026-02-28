@@ -54,6 +54,8 @@ export interface Violation {
     message: string;
     /** Which gate detected this */
     gate: GateName;
+    /** Severity level (error = blocking, warning = non-blocking) */
+    severity?: 'error' | 'warning';
 }
 /**
  * Result of running a single gate

@@ -72,6 +72,9 @@ export interface Violation {
 
   /** Which gate detected this */
   gate: GateName;
+
+  /** Severity level (error = blocking, warning = non-blocking) */
+  severity?: 'error' | 'warning';
 }
 
 /**

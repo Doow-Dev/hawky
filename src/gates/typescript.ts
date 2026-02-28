@@ -51,6 +51,7 @@ export function parseTypeScriptOutput(output: string, cwd: string): Violation[] 
         column: parseInt(colStr, 10),
         message: message.trim(),
         gate: 'typescript',
+        severity: 'error', // TypeScript errors are always blocking
       });
     }
   }
@@ -60,15 +61,16 @@ export function parseTypeScriptOutput(output: string, cwd: string): Violation[] 
 
 /**
  * Convert a violation to a GitHub annotation
+ * Uses the violation's severity if set, otherwise defaults to 'error'
  */
 export function violationToAnnotation(violation: Violation): Annotation {
   const annotation: Annotation = {
     file: violation.file,
     line: violation.line,
     message: violation.message,
-    severity: 'error',
+    severity: violation.severity || 'error',
     ruleId: violation.ruleId,
-    title: `TypeScript ${violation.ruleId}`,
+    title: `${violation.gate === 'eslint' ? 'ESLint' : 'TypeScript'} ${violation.ruleId}`,
   };
   // Only add column if defined
   if (violation.column !== undefined) {
