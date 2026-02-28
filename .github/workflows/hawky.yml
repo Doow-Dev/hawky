@@ -160,6 +160,95 @@ jobs:
           echo "TypeScript check failed with $ERROR_COUNT error(s)"
           exit 1
 
+      # S003: Build Gate
+      - name: Build Gate
+        id: build
+        run: |
+          echo "## Build Gate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          BUILD_CMD=""
+          BUILD_SOURCE=""
+
+          # Priority 1: Check .claude/COMMANDS.md for build command
+          if [ -f ".claude/COMMANDS.md" ]; then
+            # Look for build command in COMMANDS.md (format: "build: <command>" or "Build: <command>")
+            COMMANDS_BUILD=$(grep -iE "^(build|Build):\s*" .claude/COMMANDS.md | head -1 | sed 's/^[Bb]uild:\s*//' | xargs)
+            if [ -n "$COMMANDS_BUILD" ]; then
+              BUILD_CMD="$COMMANDS_BUILD"
+              BUILD_SOURCE=".claude/COMMANDS.md"
+            fi
+          fi
+
+          # Priority 2: Check package.json for build script
+          if [ -z "$BUILD_CMD" ] && [ -f "package.json" ]; then
+            # Check if build script exists in package.json
+            if node -e "const pkg = require('./package.json'); if (pkg.scripts && pkg.scripts.build) { console.log(pkg.scripts.build); process.exit(0); } else { process.exit(1); }" 2>/dev/null; then
+              BUILD_CMD="npm run build"
+              BUILD_SOURCE="package.json"
+            fi
+          fi
+
+          # Skip if no build command found
+          if [ -z "$BUILD_CMD" ]; then
+            echo "No build command found — skipping build gate"
+            echo ":white_check_mark: **Skipped** — No build command found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Checked: .claude/COMMANDS.md, package.json_" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "Build command: $BUILD_CMD (from $BUILD_SOURCE)"
+          echo "**Source:** \`$BUILD_SOURCE\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Command:** \`$BUILD_CMD\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Run build and capture timing
+          BUILD_START=$(date +%s)
+          set +e
+          BUILD_OUTPUT=$(eval "$BUILD_CMD" 2>&1)
+          BUILD_EXIT_CODE=$?
+          set -e
+          BUILD_END=$(date +%s)
+          BUILD_TIME=$((BUILD_END - BUILD_START))
+
+          echo "**Build time:** ${BUILD_TIME}s" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Collect warnings (common patterns across build tools)
+          WARNING_COUNT=$(echo "$BUILD_OUTPUT" | grep -ciE "(warning|warn\b|⚠)" || echo "0")
+
+          if [ "$WARNING_COUNT" -gt 0 ]; then
+            echo "### Warnings ($WARNING_COUNT)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "$BUILD_OUTPUT" | grep -iE "(warning|warn\b|⚠)" | head -50 >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "::warning::Build completed with $WARNING_COUNT warning(s)"
+          fi
+
+          # Check for build failure
+          if [ "$BUILD_EXIT_CODE" -ne 0 ]; then
+            echo ":x: **Failed** — Build exited with code $BUILD_EXIT_CODE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Build Output" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "$BUILD_OUTPUT" | tail -100 >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo ""
+            echo "Build failed with exit code $BUILD_EXIT_CODE"
+            exit 1
+          fi
+
+          echo ":white_check_mark: **Passed** — Build completed in ${BUILD_TIME}s" >> $GITHUB_STEP_SUMMARY
+          if [ "$WARNING_COUNT" -gt 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_$WARNING_COUNT warning(s) collected (non-blocking)_" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "Build passed in ${BUILD_TIME}s ($WARNING_COUNT warnings)"
+
       # Scaffold placeholder - future gates will build on this
       - name: Hawky Scaffold Ready
         run: |
