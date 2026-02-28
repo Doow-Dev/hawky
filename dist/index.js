@@ -26681,6 +26681,309 @@ exports.GATE_NAMES = [
 
 /***/ }),
 
+/***/ 6620:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/**
+ * Gates Module
+ *
+ * Exports all gate implementations and common types.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
+// TypeScript Gate
+var typescript_1 = __nccwpck_require__(9249);
+Object.defineProperty(exports, "typescriptGate", ({ enumerable: true, get: function () { return typescript_1.typescriptGate; } }));
+Object.defineProperty(exports, "parseTypeScriptOutput", ({ enumerable: true, get: function () { return typescript_1.parseTypeScriptOutput; } }));
+Object.defineProperty(exports, "violationToAnnotation", ({ enumerable: true, get: function () { return typescript_1.violationToAnnotation; } }));
+
+
+/***/ }),
+
+/***/ 9249:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * TypeScript Gate
+ *
+ * Runs `tsc --noEmit` and reports type errors.
+ * Integrates with baseline (existing vs new violations) and hawkyignore.
+ *
+ * Error format: file(line,col): error TSxxxx: message
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.typescriptGate = void 0;
+exports.parseTypeScriptOutput = parseTypeScriptOutput;
+exports.violationToAnnotation = violationToAnnotation;
+const core = __importStar(__nccwpck_require__(7484));
+const exec = __importStar(__nccwpck_require__(5236));
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+/**
+ * Regex to parse TypeScript error output
+ * Format: file(line,col): error TSxxxx: message
+ * Example: src/index.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'.
+ */
+const TS_ERROR_REGEX = /^([^(]+)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
+/**
+ * Parse TypeScript compiler output into violations
+ */
+function parseTypeScriptOutput(output, cwd) {
+    const violations = [];
+    const lines = output.split('\n');
+    for (const line of lines) {
+        const match = line.match(TS_ERROR_REGEX);
+        if (match && match[1] && match[2] && match[3] && match[4] && match[5]) {
+            const filePath = match[1];
+            const lineStr = match[2];
+            const colStr = match[3];
+            const ruleId = match[4];
+            const message = match[5];
+            // Normalize file path to be relative to cwd
+            let normalizedPath = filePath.trim();
+            if (path.isAbsolute(normalizedPath)) {
+                normalizedPath = path.relative(cwd, normalizedPath);
+            }
+            // Normalize path separators to forward slashes
+            normalizedPath = normalizedPath.replace(/\\/g, '/');
+            violations.push({
+                ruleId,
+                file: normalizedPath,
+                line: parseInt(lineStr, 10),
+                column: parseInt(colStr, 10),
+                message: message.trim(),
+                gate: 'typescript',
+            });
+        }
+    }
+    return violations;
+}
+/**
+ * Convert a violation to a GitHub annotation
+ */
+function violationToAnnotation(violation) {
+    const annotation = {
+        file: violation.file,
+        line: violation.line,
+        message: violation.message,
+        severity: 'error',
+        ruleId: violation.ruleId,
+        title: `TypeScript ${violation.ruleId}`,
+    };
+    // Only add column if defined
+    if (violation.column !== undefined) {
+        annotation.column = violation.column;
+    }
+    return annotation;
+}
+/**
+ * Check if TypeScript is available and tsconfig.json exists
+ */
+async function checkTypeScriptAvailable(cwd) {
+    // Check for tsconfig.json
+    const tsconfigPath = path.join(cwd, 'tsconfig.json');
+    if (!fs.existsSync(tsconfigPath)) {
+        return { available: false, reason: 'No tsconfig.json found' };
+    }
+    // Check if tsc is available
+    try {
+        let tscVersion = '';
+        await exec.exec('npx', ['tsc', '--version'], {
+            cwd,
+            silent: true,
+            listeners: {
+                stdout: (data) => {
+                    tscVersion += data.toString();
+                },
+            },
+        });
+        core.debug(`TypeScript version: ${tscVersion.trim()}`);
+        return { available: true };
+    }
+    catch {
+        return { available: false, reason: 'TypeScript compiler (tsc) not available' };
+    }
+}
+/**
+ * Run TypeScript type checking
+ */
+async function runTypeScript(cwd, timeoutMs) {
+    let output = '';
+    let exitCode = 0;
+    let timedOut = false;
+    const execPromise = exec.exec('npx', ['tsc', '--noEmit'], {
+        cwd,
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                output += data.toString();
+            },
+            stderr: (data) => {
+                output += data.toString();
+            },
+        },
+    });
+    // Create timeout promise
+    const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => {
+            timedOut = true;
+            resolve(-1);
+        }, timeoutMs);
+    });
+    // Race between exec and timeout
+    exitCode = await Promise.race([execPromise, timeoutPromise]);
+    return { output, exitCode, timedOut };
+}
+/**
+ * TypeScript Gate implementation
+ */
+exports.typescriptGate = {
+    name: 'typescript',
+    displayName: 'TypeScript',
+    async canRun(cwd) {
+        const check = await checkTypeScriptAvailable(cwd);
+        return check.available;
+    },
+    async run(options) {
+        const startTime = Date.now();
+        const { cwd, timeoutMs, createAnnotations } = options;
+        // Check if we can run
+        const check = await checkTypeScriptAvailable(cwd);
+        if (!check.available) {
+            return {
+                gate: 'typescript',
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: check.reason || 'TypeScript not available',
+            };
+        }
+        try {
+            // Run tsc --noEmit
+            core.info('Running tsc --noEmit...');
+            const { output, timedOut } = await runTypeScript(cwd, timeoutMs);
+            if (timedOut) {
+                return {
+                    gate: 'typescript',
+                    status: 'error',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs: Date.now() - startTime,
+                    message: `TypeScript check timed out after ${timeoutMs}ms`,
+                    error: 'Timeout',
+                    rawOutput: output,
+                };
+            }
+            // Parse output into violations
+            const violations = parseTypeScriptOutput(output, cwd);
+            const timeMs = Date.now() - startTime;
+            // If no violations, gate passes
+            if (violations.length === 0) {
+                return {
+                    gate: 'typescript',
+                    status: 'pass',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs,
+                    message: 'No type errors',
+                    rawOutput: output,
+                };
+            }
+            // Create annotations for all violations (filtering happens in index.ts)
+            const annotations = createAnnotations
+                ? violations.map(violationToAnnotation)
+                : [];
+            // Note: baseline and ignore filtering happens in index.ts
+            // This gate returns ALL violations; caller partitions them
+            return {
+                gate: 'typescript',
+                status: 'fail', // Caller may override based on new vs existing
+                totalViolations: violations.length,
+                newViolations: violations.length, // Caller updates after filtering
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations,
+                violations,
+                timeMs,
+                message: `${violations.length} type error(s) found`,
+                rawOutput: output,
+            };
+        }
+        catch (error) {
+            const timeMs = Date.now() - startTime;
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            return {
+                gate: 'typescript',
+                status: 'error',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs,
+                message: `TypeScript check failed: ${errorMessage}`,
+                error: errorMessage,
+            };
+        }
+    },
+};
+exports["default"] = exports.typescriptGate;
+
+
+/***/ }),
+
 /***/ 2446:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -27163,6 +27466,7 @@ const core = __importStar(__nccwpck_require__(7484));
 const config_1 = __nccwpck_require__(9750);
 const baseline_1 = __nccwpck_require__(3907);
 const ignore_1 = __nccwpck_require__(2446);
+const gates_1 = __nccwpck_require__(6620);
 /**
  * Read and parse action inputs from workflow
  */
@@ -27184,6 +27488,73 @@ function getInputs() {
         configPath: configPath || '.hawky.yml',
         githubToken,
     };
+}
+/**
+ * Filter violations through baseline and hawkyignore
+ * Returns updated GateResult with correct counts and filtered annotations
+ */
+function filterViolations(result, baseline, ignorePatterns, cwd) {
+    const newViolations = [];
+    const existingViolations = [];
+    const ignoredViolations = [];
+    const newAnnotations = [];
+    for (const violation of result.violations) {
+        // Check hawkyignore first
+        const gatePrefix = `${violation.gate}:${violation.ruleId}`;
+        const ignoreResult = (0, ignore_1.shouldIgnore)(violation.file, gatePrefix, ignorePatterns);
+        if (ignoreResult.ignored) {
+            ignoredViolations.push(violation);
+            continue;
+        }
+        // Check baseline
+        if (baseline) {
+            // Compute hash using file path and line number (hash.ts reads the file)
+            const fullPath = `${cwd}/${violation.file}`;
+            const matchResult = (0, baseline_1.isExistingViolation)(violation.ruleId, fullPath, violation.line, baseline);
+            if (!matchResult.isNew) {
+                existingViolations.push(violation);
+                continue;
+            }
+        }
+        // It's a new violation
+        newViolations.push(violation);
+        newAnnotations.push((0, gates_1.violationToAnnotation)(violation));
+    }
+    // Determine status based on new violations only
+    const status = newViolations.length > 0 ? 'fail' : 'pass';
+    const message = newViolations.length > 0
+        ? `${newViolations.length} new error(s) found (${existingViolations.length} existing, ${ignoredViolations.length} ignored)`
+        : existingViolations.length > 0
+            ? `No new errors (${existingViolations.length} existing in baseline)`
+            : result.message;
+    return {
+        ...result,
+        status,
+        newViolations: newViolations.length,
+        existingViolations: existingViolations.length,
+        ignoredViolations: ignoredViolations.length,
+        annotations: newAnnotations,
+        message,
+    };
+}
+/**
+ * Log gate result to console
+ */
+function logGateResult(result) {
+    const icon = result.status === 'pass'
+        ? '[PASS]'
+        : result.status === 'skip'
+            ? '[SKIP]'
+            : result.status === 'error'
+                ? '[ERROR]'
+                : '[FAIL]';
+    core.info(`${icon} ${result.gate}: ${result.message} (${result.timeMs}ms)`);
+    if (result.totalViolations > 0) {
+        core.info(`  - Total: ${result.totalViolations}`);
+        core.info(`  - New: ${result.newViolations}`);
+        core.info(`  - Existing (baseline): ${result.existingViolations}`);
+        core.info(`  - Ignored: ${result.ignoredViolations}`);
+    }
 }
 /**
  * Main action entry point
@@ -27292,14 +27663,104 @@ async function run() {
             }
         }
         core.endGroup();
-        // TODO(@Luna, 2026-02-28): S100-S103 - Run individual gates
+        // S100-S103: Run individual gates
+        const gateResults = [];
+        let gatesPassed = 0;
+        let gatesFailed = 0;
+        let hasBlockingFailure = false;
+        const cwd = process.cwd();
+        for (const gateName of gatesToRun) {
+            // Check fail-fast: stop if we already have a blocking failure
+            if (effectiveFailFast && hasBlockingFailure) {
+                core.info(`Skipping ${gateName} (fail-fast mode, previous gate failed)`);
+                continue;
+            }
+            const gateConfig = config.gates[gateName];
+            const timeoutMs = gateConfig.timeout * 1000;
+            core.startGroup(`Running ${gateName} gate`);
+            let result;
+            // S100: TypeScript Gate
+            if (gateName === 'typescript') {
+                result = await gates_1.typescriptGate.run({
+                    cwd,
+                    timeoutMs,
+                    createAnnotations: true,
+                });
+                // Apply baseline and hawkyignore filtering
+                if (result.violations.length > 0) {
+                    result = filterViolations(result, baseline, ignorePatterns, cwd);
+                }
+            }
+            else {
+                // TODO(@Luna, 2026-02-28): S101-S103 - Other gates
+                result = {
+                    gate: gateName,
+                    status: 'skip',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs: 0,
+                    message: `${gateName} gate not yet implemented`,
+                };
+            }
+            gateResults.push(result);
+            // Log result
+            logGateResult(result);
+            // Create GitHub annotations for new violations
+            if (result.annotations.length > 0) {
+                for (const annotation of result.annotations) {
+                    // Build annotation properties, only adding column if defined
+                    const props = {
+                        file: annotation.file,
+                        startLine: annotation.line,
+                        title: annotation.title || annotation.ruleId,
+                    };
+                    if (annotation.column !== undefined) {
+                        props.startColumn = annotation.column;
+                    }
+                    if (annotation.severity === 'error') {
+                        core.error(annotation.message, props);
+                    }
+                    else if (annotation.severity === 'warning') {
+                        core.warning(annotation.message, props);
+                    }
+                }
+            }
+            // Track pass/fail
+            if (result.status === 'pass' || result.status === 'skip') {
+                gatesPassed++;
+            }
+            else if (result.status === 'fail' || result.status === 'error') {
+                gatesFailed++;
+                if (gateConfig.blocking) {
+                    hasBlockingFailure = true;
+                }
+            }
+            core.endGroup();
+        }
         // TODO(@Luna, 2026-02-28): S104 - Generate PR comment
         // TODO(@Luna, 2026-02-28): S105 - Generate step summary
-        // Placeholder outputs (will be populated by gate results)
-        core.setOutput('status', 'pass');
-        core.setOutput('gates_passed', inputs.gates.length);
-        core.setOutput('gates_failed', 0);
-        core.info('Hawky completed successfully (scaffold mode)');
+        // Set outputs
+        const overallStatus = hasBlockingFailure ? 'fail' : 'pass';
+        core.setOutput('status', overallStatus);
+        core.setOutput('gates_passed', gatesPassed);
+        core.setOutput('gates_failed', gatesFailed);
+        // Summary
+        core.info('');
+        core.info('='.repeat(50));
+        core.info(`Hawky Summary: ${gatesPassed} passed, ${gatesFailed} failed`);
+        core.info(`Overall Status: ${overallStatus.toUpperCase()}`);
+        core.info('='.repeat(50));
+        // Fail the action if any blocking gate failed
+        if (hasBlockingFailure) {
+            core.setFailed(`Hawky found blocking violations`);
+        }
+        else {
+            core.info('Hawky completed successfully');
+        }
     }
     catch (error) {
         if (error instanceof Error) {

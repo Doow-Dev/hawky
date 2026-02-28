@@ -1,0 +1,19 @@
+/**
+ * Gates Module
+ *
+ * Exports all gate implementations and common types.
+ */
+
+// Types
+export type {
+  Annotation,
+  AnnotationSeverity,
+  Gate,
+  GateResult,
+  GateRunOptions,
+  GateStatus,
+  Violation,
+} from './types';
+
+// TypeScript Gate
+export { typescriptGate, parseTypeScriptOutput, violationToAnnotation } from './typescript';

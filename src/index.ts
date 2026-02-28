@@ -10,15 +10,24 @@ import { loadConfigFromCwd, GATE_NAMES, type HawkyConfig, type GateName } from '
 import {
   loadBaselineFromCwd,
   getViolationCounts,
+  isExistingViolation,
   type Baseline,
   type BaselineLoadResult,
 } from './baseline';
 import {
   loadIgnoreFromCwd,
   getPatternSummary,
+  shouldIgnore,
   type IgnorePattern,
   type IgnoreLoadResult,
 } from './ignore';
+import {
+  typescriptGate,
+  violationToAnnotation,
+  type GateResult,
+  type Violation,
+  type Annotation,
+} from './gates';
 
 /**
  * Parsed action inputs
@@ -54,6 +63,96 @@ function getInputs(): HawkyInputs {
     configPath: configPath || '.hawky.yml',
     githubToken,
   };
+}
+
+/**
+ * Filter violations through baseline and hawkyignore
+ * Returns updated GateResult with correct counts and filtered annotations
+ */
+function filterViolations(
+  result: GateResult,
+  baseline: Baseline | null,
+  ignorePatterns: IgnorePattern[],
+  cwd: string
+): GateResult {
+  const newViolations: Violation[] = [];
+  const existingViolations: Violation[] = [];
+  const ignoredViolations: Violation[] = [];
+  const newAnnotations: Annotation[] = [];
+
+  for (const violation of result.violations) {
+    // Check hawkyignore first
+    const gatePrefix = `${violation.gate}:${violation.ruleId}`;
+    const ignoreResult = shouldIgnore(violation.file, gatePrefix, ignorePatterns);
+
+    if (ignoreResult.ignored) {
+      ignoredViolations.push(violation);
+      continue;
+    }
+
+    // Check baseline
+    if (baseline) {
+      // Compute hash using file path and line number (hash.ts reads the file)
+      const fullPath = `${cwd}/${violation.file}`;
+      const matchResult = isExistingViolation(
+        violation.ruleId,
+        fullPath,
+        violation.line,
+        baseline
+      );
+
+      if (!matchResult.isNew) {
+        existingViolations.push(violation);
+        continue;
+      }
+    }
+
+    // It's a new violation
+    newViolations.push(violation);
+    newAnnotations.push(violationToAnnotation(violation));
+  }
+
+  // Determine status based on new violations only
+  const status = newViolations.length > 0 ? 'fail' : 'pass';
+  const message =
+    newViolations.length > 0
+      ? `${newViolations.length} new error(s) found (${existingViolations.length} existing, ${ignoredViolations.length} ignored)`
+      : existingViolations.length > 0
+        ? `No new errors (${existingViolations.length} existing in baseline)`
+        : result.message;
+
+  return {
+    ...result,
+    status,
+    newViolations: newViolations.length,
+    existingViolations: existingViolations.length,
+    ignoredViolations: ignoredViolations.length,
+    annotations: newAnnotations,
+    message,
+  };
+}
+
+/**
+ * Log gate result to console
+ */
+function logGateResult(result: GateResult): void {
+  const icon =
+    result.status === 'pass'
+      ? '[PASS]'
+      : result.status === 'skip'
+        ? '[SKIP]'
+        : result.status === 'error'
+          ? '[ERROR]'
+          : '[FAIL]';
+
+  core.info(`${icon} ${result.gate}: ${result.message} (${result.timeMs}ms)`);
+
+  if (result.totalViolations > 0) {
+    core.info(`  - Total: ${result.totalViolations}`);
+    core.info(`  - New: ${result.newViolations}`);
+    core.info(`  - Existing (baseline): ${result.existingViolations}`);
+    core.info(`  - Ignored: ${result.ignoredViolations}`);
+  }
 }
 
 /**
@@ -176,16 +275,116 @@ async function run(): Promise<void> {
     }
     core.endGroup();
 
-    // TODO(@Luna, 2026-02-28): S100-S103 - Run individual gates
+    // S100-S103: Run individual gates
+    const gateResults: GateResult[] = [];
+    let gatesPassed = 0;
+    let gatesFailed = 0;
+    let hasBlockingFailure = false;
+    const cwd = process.cwd();
+
+    for (const gateName of gatesToRun) {
+      // Check fail-fast: stop if we already have a blocking failure
+      if (effectiveFailFast && hasBlockingFailure) {
+        core.info(`Skipping ${gateName} (fail-fast mode, previous gate failed)`);
+        continue;
+      }
+
+      const gateConfig = config.gates[gateName];
+      const timeoutMs = gateConfig.timeout * 1000;
+
+      core.startGroup(`Running ${gateName} gate`);
+
+      let result: GateResult;
+
+      // S100: TypeScript Gate
+      if (gateName === 'typescript') {
+        result = await typescriptGate.run({
+          cwd,
+          timeoutMs,
+          createAnnotations: true,
+        });
+
+        // Apply baseline and hawkyignore filtering
+        if (result.violations.length > 0) {
+          result = filterViolations(result, baseline, ignorePatterns, cwd);
+        }
+      } else {
+        // TODO(@Luna, 2026-02-28): S101-S103 - Other gates
+        result = {
+          gate: gateName,
+          status: 'skip',
+          totalViolations: 0,
+          newViolations: 0,
+          existingViolations: 0,
+          ignoredViolations: 0,
+          annotations: [],
+          violations: [],
+          timeMs: 0,
+          message: `${gateName} gate not yet implemented`,
+        };
+      }
+
+      gateResults.push(result);
+
+      // Log result
+      logGateResult(result);
+
+      // Create GitHub annotations for new violations
+      if (result.annotations.length > 0) {
+        for (const annotation of result.annotations) {
+          // Build annotation properties, only adding column if defined
+          const props: { file: string; startLine: number; startColumn?: number; title: string } = {
+            file: annotation.file,
+            startLine: annotation.line,
+            title: annotation.title || annotation.ruleId,
+          };
+          if (annotation.column !== undefined) {
+            props.startColumn = annotation.column;
+          }
+
+          if (annotation.severity === 'error') {
+            core.error(annotation.message, props);
+          } else if (annotation.severity === 'warning') {
+            core.warning(annotation.message, props);
+          }
+        }
+      }
+
+      // Track pass/fail
+      if (result.status === 'pass' || result.status === 'skip') {
+        gatesPassed++;
+      } else if (result.status === 'fail' || result.status === 'error') {
+        gatesFailed++;
+        if (gateConfig.blocking) {
+          hasBlockingFailure = true;
+        }
+      }
+
+      core.endGroup();
+    }
+
     // TODO(@Luna, 2026-02-28): S104 - Generate PR comment
     // TODO(@Luna, 2026-02-28): S105 - Generate step summary
 
-    // Placeholder outputs (will be populated by gate results)
-    core.setOutput('status', 'pass');
-    core.setOutput('gates_passed', inputs.gates.length);
-    core.setOutput('gates_failed', 0);
+    // Set outputs
+    const overallStatus = hasBlockingFailure ? 'fail' : 'pass';
+    core.setOutput('status', overallStatus);
+    core.setOutput('gates_passed', gatesPassed);
+    core.setOutput('gates_failed', gatesFailed);
 
-    core.info('Hawky completed successfully (scaffold mode)');
+    // Summary
+    core.info('');
+    core.info('='.repeat(50));
+    core.info(`Hawky Summary: ${gatesPassed} passed, ${gatesFailed} failed`);
+    core.info(`Overall Status: ${overallStatus.toUpperCase()}`);
+    core.info('='.repeat(50));
+
+    // Fail the action if any blocking gate failed
+    if (hasBlockingFailure) {
+      core.setFailed(`Hawky found blocking violations`);
+    } else {
+      core.info('Hawky completed successfully');
+    }
   } catch (error) {
     if (error instanceof Error) {
       core.setFailed(`Hawky failed: ${error.message}`);
