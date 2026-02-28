@@ -27143,7 +27143,7 @@ exports["default"] = exports.eslintGate;
  * Exports all gate implementations and common types.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
+exports.semgrepViolationToAnnotation = exports.semgrepGetChangedFiles = exports.parseSemgrepOutputWithSeverity = exports.parseSemgrepOutput = exports.semgrepGate = exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
 // TypeScript Gate
 var typescript_1 = __nccwpck_require__(9249);
 Object.defineProperty(exports, "typescriptGate", ({ enumerable: true, get: function () { return typescript_1.typescriptGate; } }));
@@ -27156,6 +27156,497 @@ Object.defineProperty(exports, "parseESLintOutput", ({ enumerable: true, get: fu
 Object.defineProperty(exports, "parseESLintOutputWithSeverity", ({ enumerable: true, get: function () { return eslint_1.parseESLintOutputWithSeverity; } }));
 Object.defineProperty(exports, "getChangedFiles", ({ enumerable: true, get: function () { return eslint_1.getChangedFiles; } }));
 Object.defineProperty(exports, "eslintViolationToAnnotation", ({ enumerable: true, get: function () { return eslint_1.violationToAnnotation; } }));
+// Semgrep Gate
+var semgrep_1 = __nccwpck_require__(5683);
+Object.defineProperty(exports, "semgrepGate", ({ enumerable: true, get: function () { return semgrep_1.semgrepGate; } }));
+Object.defineProperty(exports, "parseSemgrepOutput", ({ enumerable: true, get: function () { return semgrep_1.parseSemgrepOutput; } }));
+Object.defineProperty(exports, "parseSemgrepOutputWithSeverity", ({ enumerable: true, get: function () { return semgrep_1.parseSemgrepOutputWithSeverity; } }));
+Object.defineProperty(exports, "semgrepGetChangedFiles", ({ enumerable: true, get: function () { return semgrep_1.getChangedFiles; } }));
+Object.defineProperty(exports, "semgrepViolationToAnnotation", ({ enumerable: true, get: function () { return semgrep_1.violationToAnnotation; } }));
+
+
+/***/ }),
+
+/***/ 5683:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Semgrep Gate
+ *
+ * Runs Semgrep security scanning on PR-changed files.
+ * - High/Error severity findings are blocking
+ * - Medium/Warning severity findings are non-blocking (warnings)
+ * - Low/Info severity findings are informational
+ * - Integrates with baseline and hawkyignore
+ *
+ * Semgrep JSON format:
+ * { results: [{ check_id, path, start: { line, col }, extra: { severity, message } }], errors: [] }
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.semgrepGate = void 0;
+exports.parseSemgrepOutput = parseSemgrepOutput;
+exports.parseSemgrepOutputWithSeverity = parseSemgrepOutputWithSeverity;
+exports.violationToAnnotation = violationToAnnotation;
+exports.getChangedFiles = getChangedFiles;
+const core = __importStar(__nccwpck_require__(7484));
+const exec = __importStar(__nccwpck_require__(5236));
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+/**
+ * File extensions that Semgrep can scan
+ * Matches Sprint 1 implementation
+ */
+const SCANNABLE_EXTENSIONS = [
+    '.js',
+    '.jsx',
+    '.ts',
+    '.tsx',
+    '.py',
+    '.java',
+    '.go',
+    '.rb',
+    '.php',
+    '.c',
+    '.cpp',
+    '.cs',
+    '.rs',
+    '.swift',
+    '.kt',
+    '.scala',
+];
+/**
+ * Map Semgrep severity to our severity levels
+ * ERROR/HIGH = blocking errors
+ * WARNING/MEDIUM = non-blocking warnings
+ * LOW/INFO = informational
+ */
+function mapSeverity(semgrepSeverity) {
+    const sev = (semgrepSeverity || 'INFO').toUpperCase();
+    if (sev === 'ERROR' || sev === 'HIGH') {
+        return 'error';
+    }
+    // All other severities (MEDIUM, WARNING, LOW, INFO) are warnings
+    return 'warning';
+}
+/**
+ * Parse Semgrep JSON output into violations
+ */
+function parseSemgrepOutput(output, cwd) {
+    const violations = [];
+    try {
+        const data = JSON.parse(output);
+        if (!data.results || !Array.isArray(data.results)) {
+            core.debug('Semgrep output has no results array');
+            return violations;
+        }
+        for (const result of data.results) {
+            // Normalize file path to be relative to cwd
+            let normalizedPath = result.path;
+            if (path.isAbsolute(normalizedPath)) {
+                normalizedPath = path.relative(cwd, normalizedPath);
+            }
+            // Normalize path separators to forward slashes
+            normalizedPath = normalizedPath.replace(/\\/g, '/');
+            const severity = mapSeverity(result.extra?.severity);
+            const message = result.extra?.message || 'Security finding';
+            violations.push({
+                ruleId: result.check_id || 'unknown',
+                file: normalizedPath,
+                line: result.start?.line || 1,
+                column: result.start?.col || 1,
+                message: message.replace(/\n/g, ' ').trim(),
+                gate: 'semgrep',
+                severity,
+            });
+        }
+    }
+    catch (error) {
+        core.debug(`Failed to parse Semgrep JSON output: ${error}`);
+    }
+    return violations;
+}
+/**
+ * Parse Semgrep output and separate by severity
+ */
+function parseSemgrepOutputWithSeverity(output, cwd) {
+    const violations = parseSemgrepOutput(output, cwd);
+    const errors = violations.filter((v) => v.severity === 'error');
+    const warnings = violations.filter((v) => v.severity === 'warning');
+    return { errors, warnings };
+}
+/**
+ * Convert a violation to a GitHub annotation
+ */
+function violationToAnnotation(violation, severity) {
+    const annotation = {
+        file: violation.file,
+        line: violation.line,
+        message: violation.message,
+        severity,
+        ruleId: violation.ruleId,
+        title: `Semgrep ${violation.ruleId}`,
+    };
+    if (violation.column !== undefined) {
+        annotation.column = violation.column;
+    }
+    return annotation;
+}
+/**
+ * Check if Semgrep is available
+ */
+async function checkSemgrepAvailable() {
+    try {
+        let version = '';
+        await exec.exec('semgrep', ['--version'], {
+            silent: true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (data) => {
+                    version += data.toString();
+                },
+            },
+        });
+        if (version.trim()) {
+            return { available: true, version: version.trim() };
+        }
+        return { available: false, reason: 'Semgrep returned empty version' };
+    }
+    catch {
+        return { available: false, reason: 'Semgrep not found' };
+    }
+}
+/**
+ * Try to install Semgrep via pip
+ */
+async function tryInstallSemgrep() {
+    core.info('Semgrep not found, attempting to install via pip...');
+    // Try pip3 first, then pip
+    const pipCommands = ['pip3', 'pip'];
+    for (const pip of pipCommands) {
+        try {
+            const exitCode = await exec.exec(pip, ['install', 'semgrep', '--quiet'], {
+                silent: true,
+                ignoreReturnCode: true,
+            });
+            if (exitCode === 0) {
+                core.info(`Semgrep installed successfully via ${pip}`);
+                return true;
+            }
+        }
+        catch {
+            core.debug(`${pip} install failed, trying next...`);
+        }
+    }
+    core.info('Failed to install Semgrep via pip');
+    return false;
+}
+/**
+ * Get changed files from git diff
+ * Returns scannable files changed between base branch and HEAD
+ */
+async function getChangedFiles(cwd, baseBranch) {
+    const changedFiles = [];
+    try {
+        // Use environment variables to get base branch if not provided
+        const base = baseBranch || process.env['GITHUB_BASE_REF'] || 'main';
+        let output = '';
+        // Get changed files between base branch and HEAD
+        await exec.exec('git', ['diff', '--name-only', '--diff-filter=ACMR', `origin/${base}...HEAD`], {
+            cwd,
+            silent: true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (data) => {
+                    output += data.toString();
+                },
+            },
+        });
+        // Filter to scannable files that exist
+        const files = output
+            .split('\n')
+            .map((f) => f.trim())
+            .filter((f) => f.length > 0)
+            .filter((f) => SCANNABLE_EXTENSIONS.some((ext) => f.endsWith(ext)));
+        // Filter to only existing files (in case of deletions)
+        for (const file of files) {
+            const fullPath = path.join(cwd, file);
+            if (fs.existsSync(fullPath)) {
+                changedFiles.push(file);
+            }
+        }
+    }
+    catch (error) {
+        core.debug(`Failed to get changed files: ${error}`);
+        return [];
+    }
+    return changedFiles;
+}
+/**
+ * Run Semgrep on specified files
+ */
+async function runSemgrep(cwd, files, rulesets, timeoutMs) {
+    let output = '';
+    let stderr = '';
+    let exitCode = 0;
+    let timedOut = false;
+    // Build ruleset args (space-separated rulesets)
+    const rulesetArgs = [];
+    for (const ruleset of rulesets.split(/\s+/).filter((r) => r.length > 0)) {
+        rulesetArgs.push('--config', ruleset);
+    }
+    // Build include args for changed files
+    const includeArgs = [];
+    for (const file of files) {
+        includeArgs.push('--include', file);
+    }
+    // Build command: semgrep scan --config <rulesets> --json --include <files> .
+    const args = ['scan', ...rulesetArgs, '--json', ...includeArgs, '.'];
+    core.debug(`Running: semgrep ${args.join(' ')}`);
+    const execPromise = exec.exec('semgrep', args, {
+        cwd,
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                output += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    });
+    // Create timeout promise
+    const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => {
+            timedOut = true;
+            resolve(-1);
+        }, timeoutMs);
+    });
+    // Race between exec and timeout
+    exitCode = await Promise.race([execPromise, timeoutPromise]);
+    if (stderr) {
+        core.debug(`Semgrep stderr: ${stderr}`);
+    }
+    return { output, exitCode, timedOut };
+}
+/**
+ * Semgrep Gate implementation
+ */
+exports.semgrepGate = {
+    name: 'semgrep',
+    displayName: 'Semgrep',
+    async canRun(_cwd) {
+        // First check if already available
+        let check = await checkSemgrepAvailable();
+        if (check.available) {
+            return true;
+        }
+        // Try to install
+        const installed = await tryInstallSemgrep();
+        if (!installed) {
+            return false;
+        }
+        // Re-check after install
+        check = await checkSemgrepAvailable();
+        return check.available;
+    },
+    async run(options) {
+        const startTime = Date.now();
+        const { cwd, timeoutMs, createAnnotations } = options;
+        // Check if we can run (includes auto-install attempt)
+        let check = await checkSemgrepAvailable();
+        if (!check.available) {
+            // Try to install
+            const installed = await tryInstallSemgrep();
+            if (installed) {
+                check = await checkSemgrepAvailable();
+            }
+        }
+        if (!check.available) {
+            return {
+                gate: 'semgrep',
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: check.reason || 'Semgrep not available',
+            };
+        }
+        core.info(`Semgrep version: ${check.version}`);
+        // Get changed files
+        const changedFiles = await getChangedFiles(cwd);
+        if (changedFiles.length === 0) {
+            return {
+                gate: 'semgrep',
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: 'No scannable files changed in PR',
+            };
+        }
+        core.info(`Scanning ${changedFiles.length} changed file(s)...`);
+        // Get rulesets from config (passed via environment variable or default)
+        const rulesets = process.env['HAWKY_GATE_SEMGREP_RULESETS'] || 'p/security-audit';
+        core.info(`Rulesets: ${rulesets}`);
+        try {
+            // Run Semgrep
+            const { output, timedOut } = await runSemgrep(cwd, changedFiles, rulesets, timeoutMs);
+            if (timedOut) {
+                return {
+                    gate: 'semgrep',
+                    status: 'error',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs: Date.now() - startTime,
+                    message: `Semgrep timed out after ${timeoutMs}ms`,
+                    error: 'Timeout',
+                    rawOutput: output,
+                };
+            }
+            // Check if output is valid JSON
+            let parsedOutput;
+            try {
+                parsedOutput = JSON.parse(output);
+            }
+            catch {
+                return {
+                    gate: 'semgrep',
+                    status: 'error',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs: Date.now() - startTime,
+                    message: 'Semgrep output was not valid JSON',
+                    error: 'Invalid JSON output',
+                    rawOutput: output.substring(0, 1000),
+                };
+            }
+            // Check for Semgrep errors
+            if (parsedOutput.errors && parsedOutput.errors.length > 0) {
+                core.warning(`Semgrep reported ${parsedOutput.errors.length} error(s)`);
+            }
+            // Parse output with severity separation
+            const { errors, warnings } = parseSemgrepOutputWithSeverity(output, cwd);
+            const allViolations = [...errors, ...warnings];
+            const timeMs = Date.now() - startTime;
+            // If no violations, gate passes
+            if (allViolations.length === 0) {
+                return {
+                    gate: 'semgrep',
+                    status: 'pass',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs,
+                    message: 'No security findings',
+                    rawOutput: output,
+                };
+            }
+            // Create annotations
+            const annotations = [];
+            if (createAnnotations) {
+                // Errors (HIGH/ERROR severity) get error severity
+                for (const error of errors) {
+                    annotations.push(violationToAnnotation(error, 'error'));
+                }
+                // Warnings (MEDIUM/WARNING/LOW/INFO) get warning severity
+                for (const warning of warnings) {
+                    annotations.push(violationToAnnotation(warning, 'warning'));
+                }
+            }
+            // Only HIGH/ERROR block (errors count toward "new" for blocking purposes)
+            // Other severities are non-blocking
+            // Note: baseline and ignore filtering happens in index.ts
+            return {
+                gate: 'semgrep',
+                status: errors.length > 0 ? 'fail' : 'pass',
+                totalViolations: allViolations.length,
+                newViolations: allViolations.length, // Caller updates after filtering
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations,
+                violations: allViolations,
+                timeMs,
+                message: errors.length > 0
+                    ? `${errors.length} high-severity finding(s), ${warnings.length} other finding(s)`
+                    : `${warnings.length} finding(s) (non-blocking)`,
+                rawOutput: output,
+            };
+        }
+        catch (error) {
+            const timeMs = Date.now() - startTime;
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            return {
+                gate: 'semgrep',
+                status: 'error',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs,
+                message: `Semgrep failed: ${errorMessage}`,
+                error: errorMessage,
+            };
+        }
+    },
+};
+exports["default"] = exports.semgrepGate;
 
 
 /***/ }),
@@ -28166,8 +28657,23 @@ async function run() {
                     result = filterViolations(result, baseline, ignorePatterns, cwd);
                 }
             }
+            else if (gateName === 'semgrep') {
+                // S102: Semgrep Gate
+                // Set rulesets from config via environment variable
+                const rulesets = gateConfig.rulesets || 'p/security-audit';
+                process.env['HAWKY_GATE_SEMGREP_RULESETS'] = rulesets;
+                result = await gates_1.semgrepGate.run({
+                    cwd,
+                    timeoutMs,
+                    createAnnotations: true,
+                });
+                // Apply baseline and hawkyignore filtering
+                if (result.violations.length > 0) {
+                    result = filterViolations(result, baseline, ignorePatterns, cwd);
+                }
+            }
             else {
-                // TODO(@Luna, 2026-02-28): S102-S103 - Other gates
+                // TODO(@Luna, 2026-02-28): S103 - Gitleaks gate
                 result = {
                     gate: gateName,
                     status: 'skip',

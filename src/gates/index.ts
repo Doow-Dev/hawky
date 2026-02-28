@@ -30,3 +30,12 @@ export {
   getChangedFiles,
   violationToAnnotation as eslintViolationToAnnotation,
 } from './eslint';
+
+// Semgrep Gate
+export {
+  semgrepGate,
+  parseSemgrepOutput,
+  parseSemgrepOutputWithSeverity,
+  getChangedFiles as semgrepGetChangedFiles,
+  violationToAnnotation as semgrepViolationToAnnotation,
+} from './semgrep';
