@@ -21,6 +21,7 @@ import {
   type IgnorePattern,
   type IgnoreLoadResult,
 } from './ignore';
+import * as github from '@actions/github';
 import {
   typescriptGate,
   eslintGate,
@@ -31,6 +32,13 @@ import {
   type Violation,
   type Annotation,
 } from './gates';
+import {
+  postPRComment,
+  gateResultToSummary,
+  GATE_DISPLAY_NAMES,
+  type ReportData,
+  type GateSummary,
+} from './report';
 
 /**
  * Parsed action inputs
@@ -421,11 +429,86 @@ async function run(): Promise<void> {
       core.endGroup();
     }
 
-    // TODO(@Luna, 2026-02-28): S104 - Generate PR comment
+    // Set outputs
+    const overallStatus = hasBlockingFailure ? 'fail' : 'pass';
+
+    // S104: Generate and post PR comment
+    core.startGroup('Generating PR Comment');
+
+    // Build gate summaries for report
+    const gateSummaries: GateSummary[] = gateResults.map((result) => {
+      const gateConfig = config.gates[result.gate];
+      return gateResultToSummary(
+        result,
+        GATE_DISPLAY_NAMES[result.gate],
+        gateConfig.blocking
+      );
+    });
+
+    // Calculate total time
+    const totalTimeMs = gateResults.reduce((sum, r) => sum + r.timeMs, 0);
+
+    // Get baseline violation count
+    const baselineViolationCount = baseline ? getViolationCounts(baseline).total : 0;
+
+    // Get hawkyignore pattern count
+    const hawkyignorePatternCount = ignorePatterns.length;
+
+    // Determine fail-fast skipped gates
+    const failFastSkippedGates: GateName[] = [];
+    if (effectiveFailFast && hasBlockingFailure) {
+      for (const gateName of gatesToRun) {
+        if (!gateResults.some((r) => r.gate === gateName)) {
+          failFastSkippedGates.push(gateName);
+        }
+      }
+    }
+
+    // Determine disabled gates
+    const disabledGates: GateName[] = GATE_NAMES.filter(
+      (g) => !config.gates[g].enabled
+    );
+
+    // Build report data
+    const context = github.context;
+    const reportData: ReportData = {
+      overallStatus,
+      gates: gateSummaries,
+      gatesPassed,
+      gatesFailed,
+      gatesSkipped: gateResults.filter((r) => r.status === 'skip').length,
+      totalTimeMs,
+      baselineActive: baseline !== null,
+      baselineViolationCount,
+      gracePeriodActive: config.gracePeriod.active,
+      gracePeriodEndDate: config.gracePeriod.endDate ?? undefined,
+      hawkyignoreActive: ignorePatterns.length > 0,
+      hawkyignorePatternCount,
+      failFastSkippedGates,
+      disabledGates,
+      commitSha: context.sha || process.env['GITHUB_SHA'] || 'unknown',
+      workflowUrl: `${context.serverUrl || 'https://github.com'}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId || process.env['GITHUB_RUN_ID'] || '0'}`,
+      repository: `${context.repo.owner}/${context.repo.repo}`,
+      prNumber: context.payload.pull_request?.number,
+    };
+
+    // Post PR comment
+    const commentResult = await postPRComment(reportData, inputs.githubToken);
+    if (commentResult.success) {
+      if (commentResult.commentId) {
+        core.info(`PR comment posted (ID: ${commentResult.commentId})`);
+      } else {
+        core.info('Not in PR context — skipped PR comment');
+      }
+    } else {
+      core.warning(`Failed to post PR comment: ${commentResult.error}`);
+    }
+
+    core.endGroup();
+
     // TODO(@Luna, 2026-02-28): S105 - Generate step summary
 
     // Set outputs
-    const overallStatus = hasBlockingFailure ? 'fail' : 'pass';
     core.setOutput('status', overallStatus);
     core.setOutput('gates_passed', gatesPassed);
     core.setOutput('gates_failed', gatesFailed);
