@@ -420,6 +420,216 @@ jobs:
           fi
           echo "Tests passed: $PASSED passed, $SKIPPED skipped in ${TEST_TIME}s"
 
+      # S005: ESLint Gate
+      - name: ESLint Gate
+        id: eslint
+        run: |
+          echo "## ESLint Gate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check if ESLint config exists (multiple config file formats)
+          ESLINT_CONFIG=""
+          for config in .eslintrc .eslintrc.js .eslintrc.cjs .eslintrc.json .eslintrc.yml .eslintrc.yaml eslint.config.js eslint.config.mjs eslint.config.cjs; do
+            if [ -f "$config" ]; then
+              ESLINT_CONFIG="$config"
+              break
+            fi
+          done
+
+          # Also check package.json for eslintConfig field
+          if [ -z "$ESLINT_CONFIG" ] && [ -f "package.json" ]; then
+            if node -e "const pkg = require('./package.json'); if (pkg.eslintConfig) { process.exit(0); } else { process.exit(1); }" 2>/dev/null; then
+              ESLINT_CONFIG="package.json (eslintConfig)"
+            fi
+          fi
+
+          # Skip if no ESLint config found
+          if [ -z "$ESLINT_CONFIG" ]; then
+            echo "No ESLint configuration found — skipping ESLint gate"
+            echo ":white_check_mark: **Skipped** — No ESLint configuration found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Checked: .eslintrc, .eslintrc.js, .eslintrc.cjs, .eslintrc.json, .eslintrc.yml, .eslintrc.yaml, eslint.config.js, eslint.config.mjs, eslint.config.cjs, package.json (eslintConfig)_" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Check if ESLint is available
+          if ! npx eslint --version > /dev/null 2>&1; then
+            echo "ESLint not installed — skipping ESLint gate"
+            echo ":white_check_mark: **Skipped** — ESLint not installed" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          ESLINT_VERSION=$(npx eslint --version)
+          echo "ESLint version: $ESLINT_VERSION"
+          echo "**Config:** \`$ESLINT_CONFIG\`" >> $GITHUB_STEP_SUMMARY
+          echo "**ESLint version:** \`$ESLINT_VERSION\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get changed files in PR (JS/TS files only)
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD | grep -E '\.(js|jsx|ts|tsx|mjs|cjs)$' || echo "")
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No JS/TS files changed in PR — skipping ESLint"
+            echo ":white_check_mark: **Skipped** — No JS/TS files changed in PR" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Count changed files
+          FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | xargs)
+          echo "Linting $FILE_COUNT changed file(s)..."
+          echo "**Files checked:** $FILE_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Filter to only existing files (in case of deletions in the diff)
+          FILES_TO_LINT=""
+          for file in $CHANGED_FILES; do
+            if [ -f "$file" ]; then
+              FILES_TO_LINT="$FILES_TO_LINT $file"
+            fi
+          done
+
+          if [ -z "$(echo "$FILES_TO_LINT" | xargs)" ]; then
+            echo "All changed files were deleted — skipping ESLint"
+            echo ":white_check_mark: **Skipped** — All changed files were deleted" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Run ESLint with JSON output for parsing
+          ESLINT_START=$(date +%s)
+          set +e
+          ESLINT_OUTPUT=$(npx eslint --format json $FILES_TO_LINT 2>&1)
+          ESLINT_EXIT_CODE=$?
+          set -e
+          ESLINT_END=$(date +%s)
+          ESLINT_TIME=$((ESLINT_END - ESLINT_START))
+
+          echo "**Lint time:** ${ESLINT_TIME}s" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Parse JSON output
+          # ESLint JSON format: [{ filePath, messages: [{ ruleId, severity, message, line, column }], errorCount, warningCount }]
+          ERROR_COUNT=0
+          WARNING_COUNT=0
+
+          # Check if output is valid JSON
+          if echo "$ESLINT_OUTPUT" | node -e "JSON.parse(require('fs').readFileSync(0, 'utf8'))" 2>/dev/null; then
+            # Parse with Node.js for reliable JSON handling
+            PARSED=$(echo "$ESLINT_OUTPUT" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              let errors = 0, warnings = 0;
+              const annotations = [];
+
+              data.forEach(file => {
+                errors += file.errorCount || 0;
+                warnings += file.warningCount || 0;
+
+                (file.messages || []).forEach(msg => {
+                  const severity = msg.severity === 2 ? 'error' : 'warning';
+                  const line = msg.line || 1;
+                  const col = msg.column || 1;
+                  const rule = msg.ruleId || 'unknown';
+                  const message = (msg.message || '').replace(/'/g, \"'\");
+                  annotations.push({ severity, file: file.filePath, line, col, rule, message });
+                });
+              });
+
+              console.log(JSON.stringify({ errors, warnings, annotations }));
+            ")
+
+            ERROR_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).errors)")
+            WARNING_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).warnings)")
+
+            # Emit GitHub annotations
+            echo "$PARSED" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              data.annotations.forEach(a => {
+                console.log('::' + a.severity + ' file=' + a.file + ',line=' + a.line + ',col=' + a.col + ',title=ESLint ' + a.rule + '::' + a.message);
+              });
+            "
+          else
+            # JSON parsing failed - likely an ESLint configuration error
+            echo "ESLint output was not valid JSON — check configuration"
+            echo "::error::ESLint failed to produce valid output. Check configuration."
+            echo ":x: **Failed** — ESLint configuration error" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Output" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "$ESLINT_OUTPUT" | tail -50 >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          # Summary table
+          echo "### Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Type | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Errors | $ERROR_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| Warnings | $WARNING_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Store counts for future gates
+          echo "eslint_errors=$ERROR_COUNT" >> $GITHUB_OUTPUT
+          echo "eslint_warnings=$WARNING_COUNT" >> $GITHUB_OUTPUT
+
+          # Handle results
+          if [ "$ERROR_COUNT" -gt 0 ]; then
+            echo ":x: **Failed** — $ERROR_COUNT error(s), $WARNING_COUNT warning(s)" >> $GITHUB_STEP_SUMMARY
+
+            # Show detailed errors in summary
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Errors" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "$ESLINT_OUTPUT" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              data.forEach(file => {
+                const errors = (file.messages || []).filter(m => m.severity === 2);
+                if (errors.length > 0) {
+                  console.log('**' + file.filePath + '** (' + errors.length + ' error(s))');
+                  errors.forEach(e => {
+                    console.log('- Line ' + e.line + ':' + e.column + ' — ' + e.message + ' (\`' + e.ruleId + '\`)');
+                  });
+                  console.log('');
+                }
+              });
+            " >> $GITHUB_STEP_SUMMARY
+
+            echo ""
+            echo "ESLint failed: $ERROR_COUNT error(s), $WARNING_COUNT warning(s)"
+            exit 1
+          fi
+
+          if [ "$WARNING_COUNT" -gt 0 ]; then
+            echo ":white_check_mark: **Passed** — $WARNING_COUNT warning(s) (non-blocking)" >> $GITHUB_STEP_SUMMARY
+            echo "::warning::ESLint completed with $WARNING_COUNT warning(s)"
+
+            # Show warnings in collapsible section
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Warnings ($WARNING_COUNT)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "$ESLINT_OUTPUT" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              data.forEach(file => {
+                const warnings = (file.messages || []).filter(m => m.severity === 1);
+                if (warnings.length > 0) {
+                  console.log('**' + file.filePath + '** (' + warnings.length + ' warning(s))');
+                  warnings.forEach(w => {
+                    console.log('- Line ' + w.line + ':' + w.column + ' — ' + w.message + ' (\`' + w.ruleId + '\`)');
+                  });
+                  console.log('');
+                }
+              });
+            " >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+            echo "ESLint passed with $WARNING_COUNT warning(s)"
+          else
+            echo ":white_check_mark: **Passed** — No issues found" >> $GITHUB_STEP_SUMMARY
+            echo "ESLint passed — no issues"
+          fi
+
       # Scaffold placeholder - future gates will build on this
       - name: Hawky Scaffold Ready
         run: |
