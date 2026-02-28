@@ -68,6 +68,9 @@ env:
   HAWKY_GATE_GITLEAKS_ENABLED: 'true'
   HAWKY_GATE_GITLEAKS_BLOCKING: 'true'
   HAWKY_GATE_GITLEAKS_TIMEOUT: '300'
+  # S082: Grace period mode - all violations become warnings during grace period
+  HAWKY_GRACE_PERIOD_ACTIVE: 'false'
+  HAWKY_GRACE_PERIOD_END_DATE: ''
 
 # Explicit minimal permissions
 # S081: contents: write needed for baseline commits
@@ -541,6 +544,7 @@ Mode: ${{ inputs.mode }}"
             // Simple YAML parser for our flat config structure
             const config = {};
             let currentGate = null;
+            let currentSection = null;
 
             yaml.split('\n').forEach(line => {
               // Skip comments and empty lines
@@ -551,18 +555,37 @@ Mode: ${{ inputs.mode }}"
               if (topMatch) {
                 const [, key, value] = topMatch;
                 if (key === 'gates') {
+                  currentSection = 'gates';
+                  currentGate = null;
+                } else if (key === 'grace_period') {
+                  currentSection = 'grace_period';
+                  config.grace_period = {};
                   currentGate = null;
                 } else if (key === 'fail_fast') {
                   config.fail_fast = value.trim() === 'true';
+                  currentSection = null;
                 }
                 return;
               }
 
-              // Gate name (2-space indent)
+              // Gate name (2-space indent) - only when in gates section
               const gateMatch = line.match(/^  (\w+):\s*$/);
-              if (gateMatch) {
+              if (gateMatch && currentSection === 'gates') {
                 currentGate = gateMatch[1];
                 config[currentGate] = {};
+                return;
+              }
+
+              // Grace period property (2-space indent)
+              const gracePropMatch = line.match(/^  (\w+):\s*(.+)$/);
+              if (gracePropMatch && currentSection === 'grace_period') {
+                const [, prop, value] = gracePropMatch;
+                let parsedValue = value.trim();
+                // Handle quoted strings (for dates like "2026-03-15")
+                if (/^[\"'].*[\"']$/.test(parsedValue)) parsedValue = parsedValue.slice(1, -1);
+                // Handle numbers (for sprints)
+                else if (/^\d+$/.test(parsedValue)) parsedValue = parseInt(parsedValue, 10);
+                config.grace_period[prop] = parsedValue;
                 return;
               }
 
@@ -615,6 +638,30 @@ Mode: ${{ inputs.mode }}"
                 envVars.push(prefix + '_RULESETS=' + gateConfig.rulesets);
               }
             });
+
+            // S082: Grace period settings
+            if (config.grace_period) {
+              const gp = config.grace_period;
+              let endDate = null;
+
+              // Support end_date directly or compute from sprints
+              if (gp.end_date) {
+                endDate = gp.end_date;
+              } else if (gp.sprints && typeof gp.sprints === 'number') {
+                // Assume 2-week sprints from today
+                const d = new Date();
+                d.setDate(d.getDate() + (gp.sprints * 14));
+                endDate = d.toISOString().split('T')[0];
+              }
+
+              if (endDate) {
+                // Check if grace period is active (end_date is in the future)
+                const today = new Date().toISOString().split('T')[0];
+                const isActive = today <= endDate;
+                envVars.push('HAWKY_GRACE_PERIOD_ACTIVE=' + (isActive ? 'true' : 'false'));
+                envVars.push('HAWKY_GRACE_PERIOD_END_DATE=' + endDate);
+              }
+            }
 
             // Output to GITHUB_ENV (each on new line)
             envVars.forEach(v => console.log(v));
@@ -2111,6 +2158,7 @@ Mode: ${{ inputs.mode }}"
       # S007: Now includes fail-fast skip detection
       # S008: Now includes disabled gate detection from .hawky.yml config
       # S081: Now includes baseline comparison (new vs existing violations)
+      # S082: Now includes grace period mode detection
       - name: Gate Report Summary
         id: report
         if: always()
@@ -2120,6 +2168,9 @@ Mode: ${{ inputs.mode }}"
           # S081: Baseline info
           BASELINE_FOUND: ${{ steps.baseline.outputs.baseline_found || 'false' }}
           BASELINE_COUNT: ${{ steps.baseline.outputs.baseline_count || '0' }}
+          # S082: Grace period mode
+          GRACE_PERIOD_ACTIVE: ${{ env.HAWKY_GRACE_PERIOD_ACTIVE }}
+          GRACE_PERIOD_END_DATE: ${{ env.HAWKY_GRACE_PERIOD_END_DATE }}
           # S008: Gate enabled/blocking config
           TSC_ENABLED: ${{ env.HAWKY_GATE_TYPESCRIPT_ENABLED }}
           TSC_BLOCKING: ${{ env.HAWKY_GATE_TYPESCRIPT_BLOCKING }}
@@ -2178,16 +2229,32 @@ Mode: ${{ inputs.mode }}"
           FAILED_GATES=""
           FAIL_FAST_SKIPPED=""
           DISABLED_GATES=""
+          WARNED_GATES=""
+
+          # S082: Grace period mode - track gates that would block but are in grace period
+          # During grace period, ALL failures become warnings (non-blocking)
+          is_blocking() {
+            local gate_blocking="$1"
+            # If grace period is active, nothing is blocking
+            if [ "$GRACE_PERIOD_ACTIVE" = "true" ]; then
+              return 1  # false - not blocking
+            fi
+            # Otherwise, check gate's blocking config
+            [ "$gate_blocking" != "false" ]
+          }
 
           # S008: Check for disabled gates first
           if [ "$TSC_ENABLED" = "false" ]; then
             TSC_STATUS="disabled"
             DISABLED_GATES="$DISABLED_GATES TypeScript"
           elif [ "$TSC_STATUS" = "failed" ]; then
-            # Only count as blocking failure if gate is configured as blocking
-            if [ "$TSC_BLOCKING" != "false" ]; then
+            # Only count as blocking failure if gate is configured as blocking AND grace period is not active
+            if is_blocking "$TSC_BLOCKING"; then
               OVERALL_STATUS="failed"
               FAILED_GATES="$FAILED_GATES TypeScript"
+            elif [ "$GRACE_PERIOD_ACTIVE" = "true" ] && [ "$TSC_BLOCKING" != "false" ]; then
+              # Would have blocked, but grace period is active
+              WARNED_GATES="$WARNED_GATES TypeScript"
             fi
           fi
 
@@ -2195,13 +2262,15 @@ Mode: ${{ inputs.mode }}"
           if [ "$BUILD_ENABLED" = "false" ]; then
             BUILD_STATUS="disabled"
             DISABLED_GATES="$DISABLED_GATES Build"
-          elif [ "$BUILD_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && [ "$TSC_STATUS" = "failed" ] && [ "$TSC_BLOCKING" != "false" ]; then
+          elif [ "$BUILD_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && [ "$TSC_STATUS" = "failed" ] && is_blocking "$TSC_BLOCKING"; then
             BUILD_STATUS="fail-fast"
             FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED Build"
           elif [ "$BUILD_STATUS" = "failed" ]; then
-            if [ "$BUILD_BLOCKING" != "false" ]; then
+            if is_blocking "$BUILD_BLOCKING"; then
               OVERALL_STATUS="failed"
               FAILED_GATES="$FAILED_GATES Build"
+            elif [ "$GRACE_PERIOD_ACTIVE" = "true" ] && [ "$BUILD_BLOCKING" != "false" ]; then
+              WARNED_GATES="$WARNED_GATES Build"
             fi
           fi
 
@@ -2209,13 +2278,15 @@ Mode: ${{ inputs.mode }}"
           if [ "$TEST_ENABLED" = "false" ]; then
             TEST_STATUS="disabled"
             DISABLED_GATES="$DISABLED_GATES Test"
-          elif [ "$TEST_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && [ "$TSC_BLOCKING" != "false" ] || [ "$BUILD_STATUS" = "failed" ] && [ "$BUILD_BLOCKING" != "false" ]); then
+          elif [ "$TEST_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && is_blocking "$TSC_BLOCKING" || [ "$BUILD_STATUS" = "failed" ] && is_blocking "$BUILD_BLOCKING"); then
             TEST_STATUS="fail-fast"
             FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED Test"
           elif [ "$TEST_STATUS" = "failed" ]; then
-            if [ "$TEST_BLOCKING" != "false" ]; then
+            if is_blocking "$TEST_BLOCKING"; then
               OVERALL_STATUS="failed"
               FAILED_GATES="$FAILED_GATES Test"
+            elif [ "$GRACE_PERIOD_ACTIVE" = "true" ] && [ "$TEST_BLOCKING" != "false" ]; then
+              WARNED_GATES="$WARNED_GATES Test"
             fi
           fi
 
@@ -2223,13 +2294,15 @@ Mode: ${{ inputs.mode }}"
           if [ "$ESLINT_ENABLED" = "false" ]; then
             ESLINT_STATUS="disabled"
             DISABLED_GATES="$DISABLED_GATES ESLint"
-          elif [ "$ESLINT_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && [ "$TSC_BLOCKING" != "false" ] || [ "$BUILD_STATUS" = "failed" ] && [ "$BUILD_BLOCKING" != "false" ] || [ "$TEST_STATUS" = "failed" ] && [ "$TEST_BLOCKING" != "false" ]); then
+          elif [ "$ESLINT_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && is_blocking "$TSC_BLOCKING" || [ "$BUILD_STATUS" = "failed" ] && is_blocking "$BUILD_BLOCKING" || [ "$TEST_STATUS" = "failed" ] && is_blocking "$TEST_BLOCKING"); then
             ESLINT_STATUS="fail-fast"
             FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED ESLint"
           elif [ "$ESLINT_STATUS" = "failed" ]; then
-            if [ "$ESLINT_BLOCKING" != "false" ]; then
+            if is_blocking "$ESLINT_BLOCKING"; then
               OVERALL_STATUS="failed"
               FAILED_GATES="$FAILED_GATES ESLint"
+            elif [ "$GRACE_PERIOD_ACTIVE" = "true" ] && [ "$ESLINT_BLOCKING" != "false" ]; then
+              WARNED_GATES="$WARNED_GATES ESLint"
             fi
           fi
 
@@ -2237,13 +2310,15 @@ Mode: ${{ inputs.mode }}"
           if [ "$SEMGREP_ENABLED" = "false" ]; then
             SEMGREP_STATUS="disabled"
             DISABLED_GATES="$DISABLED_GATES Semgrep"
-          elif [ "$SEMGREP_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && [ "$TSC_BLOCKING" != "false" ] || [ "$BUILD_STATUS" = "failed" ] && [ "$BUILD_BLOCKING" != "false" ] || [ "$TEST_STATUS" = "failed" ] && [ "$TEST_BLOCKING" != "false" ] || [ "$ESLINT_STATUS" = "failed" ] && [ "$ESLINT_BLOCKING" != "false" ]); then
+          elif [ "$SEMGREP_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && is_blocking "$TSC_BLOCKING" || [ "$BUILD_STATUS" = "failed" ] && is_blocking "$BUILD_BLOCKING" || [ "$TEST_STATUS" = "failed" ] && is_blocking "$TEST_BLOCKING" || [ "$ESLINT_STATUS" = "failed" ] && is_blocking "$ESLINT_BLOCKING"); then
             SEMGREP_STATUS="fail-fast"
             FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED Semgrep"
           elif [ "$SEMGREP_STATUS" = "failed" ]; then
-            if [ "$SEMGREP_BLOCKING" != "false" ]; then
+            if is_blocking "$SEMGREP_BLOCKING"; then
               OVERALL_STATUS="failed"
               FAILED_GATES="$FAILED_GATES Semgrep"
+            elif [ "$GRACE_PERIOD_ACTIVE" = "true" ] && [ "$SEMGREP_BLOCKING" != "false" ]; then
+              WARNED_GATES="$WARNED_GATES Semgrep"
             fi
           fi
 
@@ -2251,13 +2326,15 @@ Mode: ${{ inputs.mode }}"
           if [ "$GITLEAKS_ENABLED" = "false" ]; then
             GITLEAKS_STATUS="disabled"
             DISABLED_GATES="$DISABLED_GATES Gitleaks"
-          elif [ "$GITLEAKS_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && [ "$TSC_BLOCKING" != "false" ] || [ "$BUILD_STATUS" = "failed" ] && [ "$BUILD_BLOCKING" != "false" ] || [ "$TEST_STATUS" = "failed" ] && [ "$TEST_BLOCKING" != "false" ] || [ "$ESLINT_STATUS" = "failed" ] && [ "$ESLINT_BLOCKING" != "false" ] || [ "$SEMGREP_STATUS" = "failed" ] && [ "$SEMGREP_BLOCKING" != "false" ]); then
+          elif [ "$GITLEAKS_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && is_blocking "$TSC_BLOCKING" || [ "$BUILD_STATUS" = "failed" ] && is_blocking "$BUILD_BLOCKING" || [ "$TEST_STATUS" = "failed" ] && is_blocking "$TEST_BLOCKING" || [ "$ESLINT_STATUS" = "failed" ] && is_blocking "$ESLINT_BLOCKING" || [ "$SEMGREP_STATUS" = "failed" ] && is_blocking "$SEMGREP_BLOCKING"); then
             GITLEAKS_STATUS="fail-fast"
             FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED Gitleaks"
           elif [ "$GITLEAKS_STATUS" = "failed" ]; then
-            if [ "$GITLEAKS_BLOCKING" != "false" ]; then
+            if is_blocking "$GITLEAKS_BLOCKING"; then
               OVERALL_STATUS="failed"
               FAILED_GATES="$FAILED_GATES Gitleaks"
+            elif [ "$GRACE_PERIOD_ACTIVE" = "true" ] && [ "$GITLEAKS_BLOCKING" != "false" ]; then
+              WARNED_GATES="$WARNED_GATES Gitleaks"
             fi
           fi
 
@@ -2303,6 +2380,14 @@ Mode: ${{ inputs.mode }}"
           # S081: Show baseline info if present
           if [ "$BASELINE_FOUND" = "true" ]; then
             echo ":bookmark: **Baseline active** — $BASELINE_COUNT existing violation(s) excluded" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+          fi
+
+          # S082: Show grace period banner if active
+          if [ "$GRACE_PERIOD_ACTIVE" = "true" ]; then
+            echo ":hourglass_flowing_sand: **Grace Period Active** — Hawky is in grace period, enforcement starts $GRACE_PERIOD_END_DATE" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "_During grace period, all findings are warnings only. After $GRACE_PERIOD_END_DATE, violations will block merge._" >> /tmp/hawky-comment.md
             echo "" >> /tmp/hawky-comment.md
           fi
 
@@ -2396,6 +2481,19 @@ Mode: ${{ inputs.mode }}"
             echo "The following gates are disabled in \`.hawky.yml\`:$DISABLED_GATES" >> /tmp/hawky-comment.md
             echo "" >> /tmp/hawky-comment.md
             echo "_To enable a gate, set \`enabled: true\` in the gate configuration._" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "</details>" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+          fi
+
+          # S082: Add grace period warned gates info if any
+          if [ -n "$WARNED_GATES" ] && [ "$GRACE_PERIOD_ACTIVE" = "true" ]; then
+            echo "<details>" >> /tmp/hawky-comment.md
+            echo "<summary>:hourglass: Grace Period — Would Block After $GRACE_PERIOD_END_DATE</summary>" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "The following gates failed but are not blocking during grace period:$WARNED_GATES" >> /tmp/hawky-comment.md
+            echo "" >> /tmp/hawky-comment.md
+            echo "_After $GRACE_PERIOD_END_DATE, these violations will block merge. Fix them before then!_" >> /tmp/hawky-comment.md
             echo "" >> /tmp/hawky-comment.md
             echo "</details>" >> /tmp/hawky-comment.md
             echo "" >> /tmp/hawky-comment.md

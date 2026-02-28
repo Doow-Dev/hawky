@@ -69,6 +69,28 @@ gates:
 #     command: "npm run test:ci -- --coverage"
 
 # ==============================================================================
+# Grace Period Mode (S082)
+# ==============================================================================
+# Grace period gives teams time to fix existing issues after adopting Hawky.
+# During grace period, ALL violations become warnings — nothing blocks merge.
+#
+# grace_period:
+#   end_date: "2026-03-15"  # Date when grace period ends (YYYY-MM-DD)
+#
+# Alternative: specify number of 2-week sprints from today:
+# grace_period:
+#   sprints: 2              # Grace period ends after 2 sprints (28 days)
+#
+# During grace period:
+# - All violations are reported but don't block merge
+# - PR comments show "Grace Period Active" banner
+# - After end_date, normal blocking resumes automatically
+#
+# Example: 30-day grace period for team adoption
+# grace_period:
+#   end_date: "2026-04-01"
+
+# ==============================================================================
 # Baseline Mode (S081)
 # ==============================================================================
 # Hawky supports baseline mode for repos with existing tech debt.
@@ -86,3 +108,16 @@ gates:
 #
 # To update the baseline after fixing issues:
 #   Run workflow with mode: "baseline-update"
+
+# ==============================================================================
+# Combining Baseline + Grace Period
+# ==============================================================================
+# These features work together:
+# - Baseline tracks EXISTING violations so only NEW ones block
+# - Grace period makes even NEW violations non-blocking temporarily
+#
+# Recommended adoption flow:
+# 1. Generate baseline (captures existing tech debt)
+# 2. Enable grace period (gives team time to learn Hawky)
+# 3. After grace period ends, only NEW violations block
+# 4. Gradually fix baseline violations over time
