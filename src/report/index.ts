@@ -23,3 +23,9 @@ export {
   postPRComment,
   HAWKY_COMMENT_MARKER,
 } from './pr-comment';
+
+// Step Summary Reporter
+export {
+  writeStepSummary,
+  generateStepSummaryMarkdown,
+} from './step-summary';

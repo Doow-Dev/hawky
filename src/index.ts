@@ -34,6 +34,7 @@ import {
 } from './gates';
 import {
   postPRComment,
+  writeStepSummary,
   gateResultToSummary,
   GATE_DISPLAY_NAMES,
   type ReportData,
@@ -506,7 +507,15 @@ async function run(): Promise<void> {
 
     core.endGroup();
 
-    // TODO(@Luna, 2026-02-28): S105 - Generate step summary
+    // S105: Generate step summary
+    core.startGroup('Generating Step Summary');
+    const summaryResult = await writeStepSummary(reportData);
+    if (summaryResult.success) {
+      core.info('Step summary written to GITHUB_STEP_SUMMARY');
+    } else {
+      core.warning(`Failed to write step summary: ${summaryResult.error}`);
+    }
+    core.endGroup();
 
     // Set outputs
     core.setOutput('status', overallStatus);
