@@ -1,0 +1,60 @@
+# Hawky - AI-Powered Code Quality Gates
+# https://github.com/the-crux-squad/hawky
+#
+# A GitHub Action that runs quality gates on pull requests:
+# - TypeScript type checking
+# - ESLint linting
+# - Semgrep security scanning
+# - Gitleaks secret detection
+#
+# Usage:
+#   - uses: the-crux-squad/hawky@v1
+#     with:
+#       fail_fast: true
+#       gates: 'typescript,eslint,semgrep,gitleaks'
+
+name: 'Hawky Code Quality Gates'
+description: 'AI-powered code quality gates for multi-agent teams'
+author: 'The Crux Squad'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  fail_fast:
+    description: 'Stop running gates after first blocking gate failure'
+    required: false
+    default: 'true'
+
+  gates:
+    description: 'Comma-separated list of gates to run (typescript,eslint,semgrep,gitleaks)'
+    required: false
+    default: 'typescript,eslint,semgrep,gitleaks'
+
+  config_path:
+    description: 'Path to Hawky configuration file'
+    required: false
+    default: '.hawky.yml'
+
+  github_token:
+    description: 'GitHub token for PR comments (defaults to GITHUB_TOKEN)'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  status:
+    description: 'Overall status (pass/fail)'
+
+  gates_passed:
+    description: 'Number of gates that passed'
+
+  gates_failed:
+    description: 'Number of gates that failed'
+
+  report_url:
+    description: 'URL to the full report (step summary)'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

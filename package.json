@@ -1,0 +1,48 @@
+{
+  "name": "hawky-action",
+  "version": "1.0.0",
+  "description": "AI-powered code quality gates for multi-agent teams",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
+    "build:watch": "ncc build src/index.ts -o dist --watch",
+    "lint": "eslint src/**/*.ts",
+    "test": "jest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "prepare": "yarn build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/the-crux-squad/hawky.git"
+  },
+  "keywords": [
+    "github-action",
+    "code-quality",
+    "typescript",
+    "eslint",
+    "semgrep",
+    "gitleaks",
+    "security"
+  ],
+  "author": "The Crux Squad",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/the-crux-squad/hawky/issues"
+  },
+  "homepage": "https://github.com/the-crux-squad/hawky#readme",
+  "dependencies": {
+    "@actions/core": "^1.10.1",
+    "@actions/exec": "^1.1.1",
+    "@actions/github": "^6.0.0",
+    "@actions/io": "^1.1.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vercel/ncc": "^0.38.1",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

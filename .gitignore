@@ -1,8 +1,14 @@
 # Dependencies
 node_modules/
 
+# Yarn PnP (not needed for GitHub Actions - we use node_modules in CI)
+.pnp.cjs
+.pnp.loader.mjs
+.yarn/
+
 # Build output
-dist/
+# Note: dist/ is NOT ignored - it must be committed for the GitHub Action to work
+# dist/
 build/
 
 # Test coverage

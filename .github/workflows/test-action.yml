@@ -1,0 +1,49 @@
+# Test workflow for Hawky action development
+#
+# Runs on push to any be-* branch (backend story branches)
+# Uses the local action (./action.yml) to verify it works
+
+name: Test Hawky Action
+
+on:
+  push:
+    branches:
+      - 'be-*'
+  pull_request:
+    branches:
+      - main
+      - dev
+
+jobs:
+  test-action:
+    name: Test Action Scaffold
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build action
+        run: yarn build
+
+      - name: Run Hawky (local action)
+        uses: ./
+        with:
+          fail_fast: 'true'
+          gates: 'typescript,eslint'
+          config_path: '.hawky.yml'
+
+      - name: Verify action ran
+        run: |
+          echo "Hawky action scaffold test completed successfully"
+          echo "The action loaded inputs and logged configuration"
