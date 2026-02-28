@@ -26681,6 +26681,439 @@ exports.GATE_NAMES = [
 
 /***/ }),
 
+/***/ 2446:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/**
+ * Hawkyignore Module
+ *
+ * Parses .hawkyignore files for suppressing specific violations.
+ *
+ * Usage:
+ * ```typescript
+ * import { loadIgnoreFromCwd, shouldIgnore, createMatcher } from './ignore';
+ *
+ * // Load patterns at action start
+ * const { patterns, found } = loadIgnoreFromCwd();
+ *
+ * // Check individual violations
+ * const result = shouldIgnore('src/legacy.ts', 'eslint:no-console', patterns);
+ * // result.ignored === true means violation should be suppressed
+ * // result.reason contains the matching pattern line
+ *
+ * // Or create a bound matcher for efficiency
+ * const matcher = createMatcher(patterns);
+ * const result2 = matcher('src/legacy.ts', 'eslint:no-console');
+ * ```
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createMatcher = exports.partitionViolations = exports.filterActiveViolations = exports.checkViolations = exports.shouldIgnore = exports.getPatternSummary = exports.parseIgnoreContent = exports.loadIgnoreFromCwd = exports.loadIgnoreFile = void 0;
+// Parser
+var parser_1 = __nccwpck_require__(1015);
+Object.defineProperty(exports, "loadIgnoreFile", ({ enumerable: true, get: function () { return parser_1.loadIgnoreFile; } }));
+Object.defineProperty(exports, "loadIgnoreFromCwd", ({ enumerable: true, get: function () { return parser_1.loadIgnoreFromCwd; } }));
+Object.defineProperty(exports, "parseIgnoreContent", ({ enumerable: true, get: function () { return parser_1.parseIgnoreContent; } }));
+Object.defineProperty(exports, "getPatternSummary", ({ enumerable: true, get: function () { return parser_1.getPatternSummary; } }));
+// Matcher
+var matcher_1 = __nccwpck_require__(372);
+Object.defineProperty(exports, "shouldIgnore", ({ enumerable: true, get: function () { return matcher_1.shouldIgnore; } }));
+Object.defineProperty(exports, "checkViolations", ({ enumerable: true, get: function () { return matcher_1.checkViolations; } }));
+Object.defineProperty(exports, "filterActiveViolations", ({ enumerable: true, get: function () { return matcher_1.filterActiveViolations; } }));
+Object.defineProperty(exports, "partitionViolations", ({ enumerable: true, get: function () { return matcher_1.partitionViolations; } }));
+Object.defineProperty(exports, "createMatcher", ({ enumerable: true, get: function () { return matcher_1.createMatcher; } }));
+
+
+/***/ }),
+
+/***/ 372:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Hawkyignore Matcher
+ *
+ * Matches violations against .hawkyignore patterns.
+ * Supports gitignore-style wildcards (*, **, ?).
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.shouldIgnore = shouldIgnore;
+exports.checkViolations = checkViolations;
+exports.filterActiveViolations = filterActiveViolations;
+exports.partitionViolations = partitionViolations;
+exports.createMatcher = createMatcher;
+/**
+ * Convert gitignore-style pattern to regex
+ *
+ * Supports:
+ * - `*` - matches any characters except /
+ * - `**` - matches any characters including /
+ * - `?` - matches single character except /
+ * - Leading `/` - anchors to root
+ * - Trailing `/` - matches directory contents
+ */
+function patternToRegex(pattern) {
+    if (!pattern)
+        return null;
+    // Escape special regex chars except * and ?
+    let regex = pattern
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        // Preserve ** as placeholder before handling *
+        .replace(/\*\*/g, '{{GLOBSTAR}}')
+        // Single * matches any chars except path separator
+        .replace(/\*/g, '[^/]*')
+        // ? matches single char except path separator
+        .replace(/\?/g, '[^/]')
+        // ** matches anything including path separators
+        .replace(/\{\{GLOBSTAR\}\}/g, '.*');
+    // If pattern doesn't start with /, match anywhere in path
+    if (!pattern.startsWith('/')) {
+        regex = '(^|/)' + regex;
+    }
+    else {
+        // Remove leading / and anchor to start
+        regex = '^' + regex.substring(1);
+    }
+    // If pattern ends with /, match directory contents
+    if (pattern.endsWith('/')) {
+        regex = regex + '.*';
+    }
+    // Anchor to end
+    return new RegExp(regex + '$', 'i');
+}
+/**
+ * Check if a file path matches a file pattern
+ */
+function matchesFilePattern(filePath, filePattern) {
+    if (!filePattern)
+        return false;
+    // Normalize path separators (Windows compatibility)
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const regex = patternToRegex(filePattern);
+    return regex !== null && regex.test(normalizedPath);
+}
+/**
+ * Check if a rule matches a rule pattern
+ *
+ * Supports exact match and wildcard match (e.g., eslint:* matches eslint:no-console)
+ */
+function matchesRulePattern(rule, rulePattern) {
+    if (!rulePattern)
+        return false;
+    // Exact match (case-insensitive)
+    if (rule.toLowerCase() === rulePattern.toLowerCase()) {
+        return true;
+    }
+    // Wildcard match using the same pattern-to-regex logic
+    const regex = patternToRegex(rulePattern);
+    return regex !== null && regex.test(rule);
+}
+/**
+ * Check if a violation should be ignored
+ *
+ * @param filePath - Path to the file containing the violation
+ * @param ruleId - Full rule ID with gate prefix (e.g., "eslint:no-console")
+ * @param patterns - Parsed ignore patterns
+ * @returns IgnoreResult indicating if the violation should be ignored
+ */
+function shouldIgnore(filePath, ruleId, patterns) {
+    for (const pattern of patterns) {
+        switch (pattern.type) {
+            case 'file':
+                // File pattern only - matches any rule in matching files
+                if (matchesFilePattern(filePath, pattern.filePattern)) {
+                    return {
+                        ignored: true,
+                        pattern,
+                        reason: pattern.raw,
+                    };
+                }
+                break;
+            case 'rule':
+                // Rule pattern only - matches this rule in any file
+                if (matchesRulePattern(ruleId, pattern.rulePattern)) {
+                    return {
+                        ignored: true,
+                        pattern,
+                        reason: pattern.raw,
+                    };
+                }
+                break;
+            case 'combined':
+                // Both rule and file must match
+                if (matchesRulePattern(ruleId, pattern.rulePattern) &&
+                    matchesFilePattern(filePath, pattern.filePattern)) {
+                    return {
+                        ignored: true,
+                        pattern,
+                        reason: pattern.raw,
+                    };
+                }
+                break;
+        }
+    }
+    return { ignored: false };
+}
+/**
+ * Check multiple violations against ignore patterns
+ *
+ * @returns Array of results matching input violations
+ */
+function checkViolations(violations, patterns) {
+    return violations.map((v) => shouldIgnore(v.filePath, v.ruleId, patterns));
+}
+/**
+ * Filter violations to only include non-ignored ones
+ */
+function filterActiveViolations(violations, patterns) {
+    return violations.filter((v) => !shouldIgnore(v.filePath, v.ruleId, patterns).ignored);
+}
+/**
+ * Partition violations into ignored and active
+ */
+function partitionViolations(violations, patterns) {
+    const active = [];
+    const ignored = [];
+    for (const violation of violations) {
+        if (shouldIgnore(violation.filePath, violation.ruleId, patterns).ignored) {
+            ignored.push(violation);
+        }
+        else {
+            active.push(violation);
+        }
+    }
+    return { active, ignored };
+}
+/**
+ * Create a bound matcher function for a set of patterns
+ *
+ * Useful when checking many violations against the same patterns
+ */
+function createMatcher(patterns) {
+    return (filePath, ruleId) => shouldIgnore(filePath, ruleId, patterns);
+}
+
+
+/***/ }),
+
+/***/ 1015:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Hawkyignore Parser
+ *
+ * Parses .hawkyignore files from the repository root.
+ * Supports three pattern formats:
+ * - File patterns: `legacy/**`, `*.generated.ts`
+ * - Rule patterns: `eslint:no-console`, `semgrep:rule.id`
+ * - Combined: `semgrep:rule.id:test/**`
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseIgnoreContent = parseIgnoreContent;
+exports.loadIgnoreFile = loadIgnoreFile;
+exports.loadIgnoreFromCwd = loadIgnoreFromCwd;
+exports.getPatternSummary = getPatternSummary;
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+/**
+ * Known gate prefixes for identifying rule patterns
+ */
+const KNOWN_GATES = ['eslint', 'typescript', 'ts', 'semgrep', 'gitleaks'];
+/**
+ * Default .hawkyignore file name
+ */
+const DEFAULT_IGNORE_FILE = '.hawkyignore';
+/**
+ * Parse a single line from .hawkyignore
+ *
+ * Format rules:
+ * - Single path: `legacy/**` -> file pattern
+ * - gate:rule: `eslint:no-console` -> rule pattern (all files)
+ * - gate:rule:path: `semgrep:rule.id:test/**` -> combined pattern
+ */
+function parseLine(line, lineNumber) {
+    const trimmed = line.trim();
+    // Skip empty lines and comments
+    if (!trimmed || trimmed.startsWith('#')) {
+        return null;
+    }
+    const parts = trimmed.split(':');
+    if (parts.length === 1) {
+        // Just a file pattern (e.g., "legacy/**", "*.generated.ts")
+        // parts[0] is guaranteed to exist since length >= 1
+        const filePattern = parts[0];
+        return {
+            type: 'file',
+            filePattern,
+            rulePattern: null,
+            line: lineNumber,
+            raw: trimmed,
+        };
+    }
+    else if (parts.length === 2) {
+        // Could be gate:rule or file with colon in name
+        // parts[0] is guaranteed to exist since length >= 2
+        const gate = parts[0].toLowerCase();
+        if (KNOWN_GATES.includes(gate)) {
+            // gate:rule - applies to all files
+            return {
+                type: 'rule',
+                filePattern: null,
+                rulePattern: trimmed, // Keep full gate:rule
+                line: lineNumber,
+                raw: trimmed,
+            };
+        }
+        else {
+            // Treat as file pattern with colon in name (rare but possible)
+            return {
+                type: 'file',
+                filePattern: trimmed,
+                rulePattern: null,
+                line: lineNumber,
+                raw: trimmed,
+            };
+        }
+    }
+    else {
+        // 3+ parts: gate:rule:path pattern
+        // e.g., semgrep:javascript.lang.security.audit.*:test/**
+        // parts[0] and parts[parts.length - 1] are guaranteed to exist since length >= 3
+        const gate = parts[0];
+        const ruleId = parts.slice(1, -1).join(':'); // Rule ID may contain colons
+        const filePattern = parts[parts.length - 1];
+        return {
+            type: 'combined',
+            filePattern,
+            rulePattern: `${gate}:${ruleId}`,
+            line: lineNumber,
+            raw: trimmed,
+        };
+    }
+}
+/**
+ * Parse .hawkyignore file content
+ */
+function parseIgnoreContent(content) {
+    const patterns = [];
+    const warnings = [];
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const lineNumber = i + 1; // 1-indexed
+        const line = lines[i]; // Guaranteed to exist since i < lines.length
+        try {
+            const pattern = parseLine(line, lineNumber);
+            if (pattern) {
+                patterns.push(pattern);
+            }
+        }
+        catch (error) {
+            warnings.push({
+                line: lineNumber,
+                message: error instanceof Error ? error.message : 'Unknown parse error',
+                raw: line,
+            });
+        }
+    }
+    return { patterns, warnings };
+}
+/**
+ * Load and parse .hawkyignore from the specified directory
+ */
+function loadIgnoreFile(cwd = process.cwd()) {
+    const ignorePath = path.join(cwd, DEFAULT_IGNORE_FILE);
+    // Check if file exists
+    if (!fs.existsSync(ignorePath)) {
+        return {
+            found: false,
+            patterns: [],
+            warnings: [],
+        };
+    }
+    try {
+        const content = fs.readFileSync(ignorePath, 'utf8');
+        const { patterns, warnings } = parseIgnoreContent(content);
+        return {
+            found: true,
+            path: ignorePath,
+            patterns,
+            warnings,
+        };
+    }
+    catch (error) {
+        // File exists but couldn't be read
+        return {
+            found: true,
+            path: ignorePath,
+            patterns: [],
+            warnings: [
+                {
+                    line: 0,
+                    message: error instanceof Error ? error.message : 'Failed to read file',
+                    raw: '',
+                },
+            ],
+        };
+    }
+}
+/**
+ * Load .hawkyignore from current working directory
+ */
+function loadIgnoreFromCwd() {
+    return loadIgnoreFile(process.cwd());
+}
+/**
+ * Get summary of patterns by type
+ */
+function getPatternSummary(patterns) {
+    return {
+        total: patterns.length,
+        filePatterns: patterns.filter((p) => p.type === 'file').length,
+        rulePatterns: patterns.filter((p) => p.type === 'rule').length,
+        combinedPatterns: patterns.filter((p) => p.type === 'combined').length,
+    };
+}
+
+
+/***/ }),
+
 /***/ 9407:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -26729,6 +27162,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(7484));
 const config_1 = __nccwpck_require__(9750);
 const baseline_1 = __nccwpck_require__(3907);
+const ignore_1 = __nccwpck_require__(2446);
 /**
  * Read and parse action inputs from workflow
  */
@@ -26832,7 +27266,32 @@ async function run() {
             core.info(`  - Branch: ${baseline.branch}`);
         }
         core.endGroup();
-        // TODO(@Luna, 2026-02-28): S099 - Load hawkyignore patterns
+        // S099: Load hawkyignore patterns for violation suppression
+        core.startGroup('Loading Hawkyignore');
+        const ignoreResult = (0, ignore_1.loadIgnoreFromCwd)();
+        let ignorePatterns = [];
+        if (!ignoreResult.found) {
+            core.info('No .hawkyignore found — all violations will be reported');
+        }
+        else {
+            ignorePatterns = ignoreResult.patterns;
+            const summary = (0, ignore_1.getPatternSummary)(ignorePatterns);
+            core.info(`Loaded ${summary.total} pattern(s) from: ${ignoreResult.path}`);
+            if (summary.filePatterns > 0) {
+                core.info(`  - File patterns: ${summary.filePatterns}`);
+            }
+            if (summary.rulePatterns > 0) {
+                core.info(`  - Rule patterns: ${summary.rulePatterns}`);
+            }
+            if (summary.combinedPatterns > 0) {
+                core.info(`  - Combined patterns: ${summary.combinedPatterns}`);
+            }
+            // Log any parse warnings
+            for (const warning of ignoreResult.warnings) {
+                core.warning(`Hawkyignore warning [line ${warning.line}]: ${warning.message}`);
+            }
+        }
+        core.endGroup();
         // TODO(@Luna, 2026-02-28): S100-S103 - Run individual gates
         // TODO(@Luna, 2026-02-28): S104 - Generate PR comment
         // TODO(@Luna, 2026-02-28): S105 - Generate step summary

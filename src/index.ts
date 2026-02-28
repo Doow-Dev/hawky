@@ -13,6 +13,12 @@ import {
   type Baseline,
   type BaselineLoadResult,
 } from './baseline';
+import {
+  loadIgnoreFromCwd,
+  getPatternSummary,
+  type IgnorePattern,
+  type IgnoreLoadResult,
+} from './ignore';
 
 /**
  * Parsed action inputs
@@ -142,7 +148,34 @@ async function run(): Promise<void> {
     }
     core.endGroup();
 
-    // TODO(@Luna, 2026-02-28): S099 - Load hawkyignore patterns
+    // S099: Load hawkyignore patterns for violation suppression
+    core.startGroup('Loading Hawkyignore');
+    const ignoreResult: IgnoreLoadResult = loadIgnoreFromCwd();
+    let ignorePatterns: IgnorePattern[] = [];
+
+    if (!ignoreResult.found) {
+      core.info('No .hawkyignore found — all violations will be reported');
+    } else {
+      ignorePatterns = ignoreResult.patterns;
+      const summary = getPatternSummary(ignorePatterns);
+      core.info(`Loaded ${summary.total} pattern(s) from: ${ignoreResult.path}`);
+      if (summary.filePatterns > 0) {
+        core.info(`  - File patterns: ${summary.filePatterns}`);
+      }
+      if (summary.rulePatterns > 0) {
+        core.info(`  - Rule patterns: ${summary.rulePatterns}`);
+      }
+      if (summary.combinedPatterns > 0) {
+        core.info(`  - Combined patterns: ${summary.combinedPatterns}`);
+      }
+
+      // Log any parse warnings
+      for (const warning of ignoreResult.warnings) {
+        core.warning(`Hawkyignore warning [line ${warning.line}]: ${warning.message}`);
+      }
+    }
+    core.endGroup();
+
     // TODO(@Luna, 2026-02-28): S100-S103 - Run individual gates
     // TODO(@Luna, 2026-02-28): S104 - Generate PR comment
     // TODO(@Luna, 2026-02-28): S105 - Generate step summary
