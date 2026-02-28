@@ -1,0 +1,70 @@
+rules:
+  - id: hawky.security.commented-auth-middleware
+    message: |
+      Commented-out authentication middleware detected. This may indicate a security
+      check that was disabled for debugging and never re-enabled.
+      Remove the comment or properly implement the authentication check.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-284: Improper Access Control"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    pattern-regex: "//\\s*(requireAuth|authenticate|checkAuth|isAuthenticated|ensureAuthenticated|authMiddleware|verifyToken|validateToken|checkToken)"
+    paths:
+      include:
+        - "**/routes/**"
+        - "**/router/**"
+        - "**/controllers/**"
+        - "**/handlers/**"
+        - "**/api/**"
+        - "**/*route*"
+        - "**/*controller*"
+        - "**/*handler*"
+
+  - id: hawky.security.commented-guard-decorator
+    message: |
+      Commented-out guard/auth decorator detected. This may indicate a security
+      check that was disabled and never re-enabled.
+      Remove the comment or properly implement the guard.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-284: Improper Access Control"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    pattern-regex: "//\\s*@(UseGuards|Auth|Authorize|Authenticated|RequireAuth|Roles|Permissions|CanActivate|Guard)"
+
+  - id: hawky.security.commented-permission-check
+    message: |
+      Commented-out permission or role check detected. This may indicate
+      an authorization bypass that was introduced accidentally.
+      Remove the comment or properly implement the permission check.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-284: Improper Access Control"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    pattern-regex: "//\\s*(checkPermission|hasPermission|requirePermission|checkRole|hasRole|requireRole|isAdmin|isAuthorized|canAccess|authorize)\\s*\\("
+
+  - id: hawky.security.commented-block-guard
+    message: |
+      Block comment around authentication/authorization code detected.
+      This may indicate disabled security checks.
+      Remove the block comment or properly implement the security check.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-284: Improper Access Control"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    pattern-regex: "/\\*[\\s\\S]*?(requireAuth|checkAuth|@UseGuards|@Auth|checkPermission|isAuthenticated)[\\s\\S]*?\\*/"
