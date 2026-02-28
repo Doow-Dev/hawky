@@ -9,8 +9,7 @@
     "lint": "eslint src/**/*.ts",
     "test": "jest",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist",
-    "prepare": "yarn build"
+    "clean": "rm -rf dist"
   },
   "repository": {
     "type": "git",
