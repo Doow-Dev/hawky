@@ -23,6 +23,7 @@ import {
 } from './ignore';
 import {
   typescriptGate,
+  eslintGate,
   violationToAnnotation,
   type GateResult,
   type Violation,
@@ -308,8 +309,20 @@ async function run(): Promise<void> {
         if (result.violations.length > 0) {
           result = filterViolations(result, baseline, ignorePatterns, cwd);
         }
+      } else if (gateName === 'eslint') {
+        // S101: ESLint Gate
+        result = await eslintGate.run({
+          cwd,
+          timeoutMs,
+          createAnnotations: true,
+        });
+
+        // Apply baseline and hawkyignore filtering
+        if (result.violations.length > 0) {
+          result = filterViolations(result, baseline, ignorePatterns, cwd);
+        }
       } else {
-        // TODO(@Luna, 2026-02-28): S101-S103 - Other gates
+        // TODO(@Luna, 2026-02-28): S102-S103 - Other gates
         result = {
           gate: gateName,
           status: 'skip',

@@ -16,4 +16,17 @@ export type {
 } from './types';
 
 // TypeScript Gate
-export { typescriptGate, parseTypeScriptOutput, violationToAnnotation } from './typescript';
+export {
+  typescriptGate,
+  parseTypeScriptOutput,
+  violationToAnnotation,
+} from './typescript';
+
+// ESLint Gate
+export {
+  eslintGate,
+  parseESLintOutput,
+  parseESLintOutputWithSeverity,
+  getChangedFiles,
+  violationToAnnotation as eslintViolationToAnnotation,
+} from './eslint';

@@ -26681,6 +26681,456 @@ exports.GATE_NAMES = [
 
 /***/ }),
 
+/***/ 4715:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * ESLint Gate
+ *
+ * Runs ESLint with `--format json` on PR-changed files.
+ * - Errors (severity 2) are blocking
+ * - Warnings (severity 1) are non-blocking
+ * - Integrates with baseline and hawkyignore
+ *
+ * ESLint JSON format:
+ * [{ filePath, messages: [{ ruleId, severity, message, line, column }], errorCount, warningCount }]
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.eslintGate = void 0;
+exports.parseESLintOutput = parseESLintOutput;
+exports.parseESLintOutputWithSeverity = parseESLintOutputWithSeverity;
+exports.violationToAnnotation = violationToAnnotation;
+exports.getChangedFiles = getChangedFiles;
+const core = __importStar(__nccwpck_require__(7484));
+const exec = __importStar(__nccwpck_require__(5236));
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+/**
+ * ESLint config file names to check (in priority order)
+ */
+const ESLINT_CONFIG_FILES = [
+    '.eslintrc',
+    '.eslintrc.js',
+    '.eslintrc.cjs',
+    '.eslintrc.json',
+    '.eslintrc.yml',
+    '.eslintrc.yaml',
+    'eslint.config.js',
+    'eslint.config.mjs',
+    'eslint.config.cjs',
+];
+/**
+ * File extensions to lint
+ */
+const LINTABLE_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'];
+/**
+ * Parse ESLint JSON output into violations
+ */
+function parseESLintOutput(output, cwd) {
+    const violations = [];
+    try {
+        const results = JSON.parse(output);
+        if (!Array.isArray(results)) {
+            core.debug('ESLint output is not an array');
+            return violations;
+        }
+        for (const file of results) {
+            if (!file.messages || !Array.isArray(file.messages)) {
+                continue;
+            }
+            for (const msg of file.messages) {
+                // Normalize file path to be relative to cwd
+                let normalizedPath = file.filePath;
+                if (path.isAbsolute(normalizedPath)) {
+                    normalizedPath = path.relative(cwd, normalizedPath);
+                }
+                // Normalize path separators to forward slashes
+                normalizedPath = normalizedPath.replace(/\\/g, '/');
+                violations.push({
+                    ruleId: msg.ruleId || 'unknown',
+                    file: normalizedPath,
+                    line: msg.line || 1,
+                    column: msg.column || 1,
+                    message: msg.message || '',
+                    gate: 'eslint',
+                    // Store severity for annotation creation
+                });
+            }
+        }
+    }
+    catch (error) {
+        core.debug(`Failed to parse ESLint JSON output: ${error}`);
+    }
+    return violations;
+}
+/**
+ * Parse ESLint output and separate errors from warnings
+ */
+function parseESLintOutputWithSeverity(output, cwd) {
+    const errors = [];
+    const warnings = [];
+    try {
+        const results = JSON.parse(output);
+        if (!Array.isArray(results)) {
+            core.debug('ESLint output is not an array');
+            return { errors, warnings };
+        }
+        for (const file of results) {
+            if (!file.messages || !Array.isArray(file.messages)) {
+                continue;
+            }
+            for (const msg of file.messages) {
+                // Normalize file path to be relative to cwd
+                let normalizedPath = file.filePath;
+                if (path.isAbsolute(normalizedPath)) {
+                    normalizedPath = path.relative(cwd, normalizedPath);
+                }
+                // Normalize path separators to forward slashes
+                normalizedPath = normalizedPath.replace(/\\/g, '/');
+                const violation = {
+                    ruleId: msg.ruleId || 'unknown',
+                    file: normalizedPath,
+                    line: msg.line || 1,
+                    column: msg.column || 1,
+                    message: msg.message || '',
+                    gate: 'eslint',
+                };
+                if (msg.severity === 2) {
+                    errors.push(violation);
+                }
+                else {
+                    warnings.push(violation);
+                }
+            }
+        }
+    }
+    catch (error) {
+        core.debug(`Failed to parse ESLint JSON output: ${error}`);
+    }
+    return { errors, warnings };
+}
+/**
+ * Convert a violation to a GitHub annotation
+ */
+function violationToAnnotation(violation, severity) {
+    const annotation = {
+        file: violation.file,
+        line: violation.line,
+        message: violation.message,
+        severity,
+        ruleId: violation.ruleId,
+        title: `ESLint ${violation.ruleId}`,
+    };
+    if (violation.column !== undefined) {
+        annotation.column = violation.column;
+    }
+    return annotation;
+}
+/**
+ * Find ESLint config file in project
+ */
+function findESLintConfig(cwd) {
+    // Check for config files
+    for (const configFile of ESLINT_CONFIG_FILES) {
+        const configPath = path.join(cwd, configFile);
+        if (fs.existsSync(configPath)) {
+            return configFile;
+        }
+    }
+    // Check package.json for eslintConfig field
+    const packageJsonPath = path.join(cwd, 'package.json');
+    if (fs.existsSync(packageJsonPath)) {
+        try {
+            const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+            if (packageJson.eslintConfig) {
+                return 'package.json (eslintConfig)';
+            }
+        }
+        catch {
+            // Ignore parse errors
+        }
+    }
+    return null;
+}
+/**
+ * Check if ESLint is available
+ */
+async function checkESLintAvailable(cwd) {
+    // Check for ESLint config
+    const configFile = findESLintConfig(cwd);
+    if (!configFile) {
+        return { available: false, reason: 'No ESLint configuration found' };
+    }
+    // Check if eslint is installed
+    try {
+        let version = '';
+        await exec.exec('npx', ['eslint', '--version'], {
+            cwd,
+            silent: true,
+            listeners: {
+                stdout: (data) => {
+                    version += data.toString();
+                },
+            },
+        });
+        return { available: true, version: version.trim() };
+    }
+    catch {
+        return { available: false, reason: 'ESLint not installed' };
+    }
+}
+/**
+ * Get changed files from git diff
+ * Returns JS/TS files changed between base branch and HEAD
+ */
+async function getChangedFiles(cwd, baseBranch) {
+    const changedFiles = [];
+    try {
+        // Use environment variables to get base branch if not provided
+        const base = baseBranch || process.env['GITHUB_BASE_REF'] || 'main';
+        let output = '';
+        // Get changed files between base branch and HEAD
+        await exec.exec('git', ['diff', '--name-only', '--diff-filter=ACMR', `origin/${base}...HEAD`], {
+            cwd,
+            silent: true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (data) => {
+                    output += data.toString();
+                },
+            },
+        });
+        // Filter to JS/TS files that exist
+        const files = output
+            .split('\n')
+            .map((f) => f.trim())
+            .filter((f) => f.length > 0)
+            .filter((f) => LINTABLE_EXTENSIONS.some((ext) => f.endsWith(ext)));
+        // Filter to only existing files (in case of deletions)
+        for (const file of files) {
+            const fullPath = path.join(cwd, file);
+            if (fs.existsSync(fullPath)) {
+                changedFiles.push(file);
+            }
+        }
+    }
+    catch (error) {
+        core.debug(`Failed to get changed files: ${error}`);
+        // Fall back to linting all files
+        return [];
+    }
+    return changedFiles;
+}
+/**
+ * Run ESLint on specified files
+ */
+async function runESLint(cwd, files, timeoutMs) {
+    let output = '';
+    let exitCode = 0;
+    let timedOut = false;
+    // Build command args
+    const args = ['eslint', '--format', 'json', ...files];
+    const execPromise = exec.exec('npx', args, {
+        cwd,
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                output += data.toString();
+            },
+            stderr: (data) => {
+                // ESLint may write to stderr for non-error messages
+                core.debug(`ESLint stderr: ${data.toString()}`);
+            },
+        },
+    });
+    // Create timeout promise
+    const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => {
+            timedOut = true;
+            resolve(-1);
+        }, timeoutMs);
+    });
+    // Race between exec and timeout
+    exitCode = await Promise.race([execPromise, timeoutPromise]);
+    return { output, exitCode, timedOut };
+}
+/**
+ * ESLint Gate implementation
+ */
+exports.eslintGate = {
+    name: 'eslint',
+    displayName: 'ESLint',
+    async canRun(cwd) {
+        const check = await checkESLintAvailable(cwd);
+        return check.available;
+    },
+    async run(options) {
+        const startTime = Date.now();
+        const { cwd, timeoutMs, createAnnotations } = options;
+        // Check if we can run
+        const check = await checkESLintAvailable(cwd);
+        if (!check.available) {
+            return {
+                gate: 'eslint',
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: check.reason || 'ESLint not available',
+            };
+        }
+        core.info(`ESLint version: ${check.version}`);
+        // Get changed files
+        const changedFiles = await getChangedFiles(cwd);
+        if (changedFiles.length === 0) {
+            return {
+                gate: 'eslint',
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: 'No JS/TS files changed in PR',
+            };
+        }
+        core.info(`Linting ${changedFiles.length} changed file(s)...`);
+        try {
+            // Run ESLint
+            const { output, timedOut } = await runESLint(cwd, changedFiles, timeoutMs);
+            if (timedOut) {
+                return {
+                    gate: 'eslint',
+                    status: 'error',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs: Date.now() - startTime,
+                    message: `ESLint timed out after ${timeoutMs}ms`,
+                    error: 'Timeout',
+                    rawOutput: output,
+                };
+            }
+            // Parse output with severity separation
+            const { errors, warnings } = parseESLintOutputWithSeverity(output, cwd);
+            const allViolations = [...errors, ...warnings];
+            const timeMs = Date.now() - startTime;
+            // If no violations, gate passes
+            if (allViolations.length === 0) {
+                return {
+                    gate: 'eslint',
+                    status: 'pass',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs,
+                    message: 'No lint errors or warnings',
+                    rawOutput: output,
+                };
+            }
+            // Create annotations
+            const annotations = [];
+            if (createAnnotations) {
+                // Errors get error severity
+                for (const error of errors) {
+                    annotations.push(violationToAnnotation(error, 'error'));
+                }
+                // Warnings get warning severity
+                for (const warning of warnings) {
+                    annotations.push(violationToAnnotation(warning, 'warning'));
+                }
+            }
+            // Only errors block (errors count toward "new" for blocking purposes)
+            // Warnings are non-blocking
+            // Note: baseline and ignore filtering happens in index.ts
+            return {
+                gate: 'eslint',
+                status: errors.length > 0 ? 'fail' : 'pass',
+                totalViolations: allViolations.length,
+                newViolations: allViolations.length, // Caller updates after filtering
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations,
+                violations: allViolations,
+                timeMs,
+                message: errors.length > 0
+                    ? `${errors.length} error(s), ${warnings.length} warning(s)`
+                    : `${warnings.length} warning(s) (non-blocking)`,
+                rawOutput: output,
+            };
+        }
+        catch (error) {
+            const timeMs = Date.now() - startTime;
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            return {
+                gate: 'eslint',
+                status: 'error',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs,
+                message: `ESLint failed: ${errorMessage}`,
+                error: errorMessage,
+            };
+        }
+    },
+};
+exports["default"] = exports.eslintGate;
+
+
+/***/ }),
+
 /***/ 6620:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -26692,12 +27142,19 @@ exports.GATE_NAMES = [
  * Exports all gate implementations and common types.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
+exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
 // TypeScript Gate
 var typescript_1 = __nccwpck_require__(9249);
 Object.defineProperty(exports, "typescriptGate", ({ enumerable: true, get: function () { return typescript_1.typescriptGate; } }));
 Object.defineProperty(exports, "parseTypeScriptOutput", ({ enumerable: true, get: function () { return typescript_1.parseTypeScriptOutput; } }));
 Object.defineProperty(exports, "violationToAnnotation", ({ enumerable: true, get: function () { return typescript_1.violationToAnnotation; } }));
+// ESLint Gate
+var eslint_1 = __nccwpck_require__(4715);
+Object.defineProperty(exports, "eslintGate", ({ enumerable: true, get: function () { return eslint_1.eslintGate; } }));
+Object.defineProperty(exports, "parseESLintOutput", ({ enumerable: true, get: function () { return eslint_1.parseESLintOutput; } }));
+Object.defineProperty(exports, "parseESLintOutputWithSeverity", ({ enumerable: true, get: function () { return eslint_1.parseESLintOutputWithSeverity; } }));
+Object.defineProperty(exports, "getChangedFiles", ({ enumerable: true, get: function () { return eslint_1.getChangedFiles; } }));
+Object.defineProperty(exports, "eslintViolationToAnnotation", ({ enumerable: true, get: function () { return eslint_1.violationToAnnotation; } }));
 
 
 /***/ }),
@@ -27691,8 +28148,20 @@ async function run() {
                     result = filterViolations(result, baseline, ignorePatterns, cwd);
                 }
             }
+            else if (gateName === 'eslint') {
+                // S101: ESLint Gate
+                result = await gates_1.eslintGate.run({
+                    cwd,
+                    timeoutMs,
+                    createAnnotations: true,
+                });
+                // Apply baseline and hawkyignore filtering
+                if (result.violations.length > 0) {
+                    result = filterViolations(result, baseline, ignorePatterns, cwd);
+                }
+            }
             else {
-                // TODO(@Luna, 2026-02-28): S101-S103 - Other gates
+                // TODO(@Luna, 2026-02-28): S102-S103 - Other gates
                 result = {
                     gate: gateName,
                     status: 'skip',
