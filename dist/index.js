@@ -25643,6 +25643,543 @@ module.exports = {
 
 /***/ }),
 
+/***/ 1555:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Baseline Hash Computation
+ *
+ * Computes stable hashes for violations using 5-line context.
+ * The hash is: sha256(rule_id + ":" + normalized_5_line_context)
+ *
+ * This allows violations to be tracked even when line numbers shift
+ * due to code changes elsewhere in the file.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.extractContext = extractContext;
+exports.normalizeContext = normalizeContext;
+exports.computeHash = computeHash;
+exports.computeHashWithMeta = computeHashWithMeta;
+const crypto = __importStar(__nccwpck_require__(6982));
+const fs = __importStar(__nccwpck_require__(9896));
+/**
+ * Extract 5-line context around a violation.
+ * Gets 2 lines before, the violation line, and 2 lines after.
+ *
+ * @param filePath - Path to the source file
+ * @param lineNumber - 1-indexed line number of the violation
+ * @returns The 5-line context as an array of strings, or null if file doesn't exist
+ */
+function extractContext(filePath, lineNumber) {
+    try {
+        if (!fs.existsSync(filePath)) {
+            return null;
+        }
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split('\n');
+        // Convert to 0-indexed
+        const zeroIndexedLine = lineNumber - 1;
+        // Get 2 lines before and 2 lines after (5 total)
+        const startLine = Math.max(0, zeroIndexedLine - 2);
+        const endLine = Math.min(lines.length, zeroIndexedLine + 3); // +3 because slice end is exclusive
+        return lines.slice(startLine, endLine);
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Normalize whitespace in context lines.
+ * - Trims leading/trailing whitespace from each line
+ * - Collapses multiple consecutive spaces to single space
+ * - Joins lines with single space
+ *
+ * @param lines - Array of context lines
+ * @returns Normalized context string
+ */
+function normalizeContext(lines) {
+    return lines
+        .map((line) => line.trim().replace(/\s+/g, ' '))
+        .join(' ')
+        .trim();
+}
+/**
+ * Compute a stable hash for a violation.
+ * Uses SHA-256 of "ruleId:normalizedContext".
+ *
+ * If the file doesn't exist, falls back to hashing "no-file:ruleId:filePath:lineNumber".
+ *
+ * @param ruleId - The rule that was violated (e.g., "TS2322", "no-console")
+ * @param filePath - Path to the file containing the violation
+ * @param lineNumber - 1-indexed line number of the violation
+ * @returns Hex-encoded SHA-256 hash
+ */
+function computeHash(ruleId, filePath, lineNumber) {
+    const context = extractContext(filePath, lineNumber);
+    if (context === null) {
+        // File doesn't exist - use fallback hash
+        return crypto
+            .createHash('sha256')
+            .update(`no-file:${ruleId}:${filePath}:${lineNumber}`)
+            .digest('hex');
+    }
+    const normalizedContext = normalizeContext(context);
+    return crypto.createHash('sha256').update(`${ruleId}:${normalizedContext}`).digest('hex');
+}
+/**
+ * Compute hash with explicit error handling.
+ * Used when we need to distinguish between file-not-found and read errors.
+ *
+ * @param ruleId - The rule that was violated
+ * @param filePath - Path to the file
+ * @param lineNumber - 1-indexed line number
+ * @returns Object with hash and metadata
+ */
+function computeHashWithMeta(ruleId, filePath, lineNumber) {
+    const context = extractContext(filePath, lineNumber);
+    if (context === null) {
+        return {
+            hash: crypto
+                .createHash('sha256')
+                .update(`no-file:${ruleId}:${filePath}:${lineNumber}`)
+                .digest('hex'),
+            fileExists: false,
+            contextLines: 0,
+        };
+    }
+    const normalizedContext = normalizeContext(context);
+    return {
+        hash: crypto.createHash('sha256').update(`${ruleId}:${normalizedContext}`).digest('hex'),
+        fileExists: true,
+        contextLines: context.length,
+    };
+}
+
+
+/***/ }),
+
+/***/ 3907:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/**
+ * Baseline Module
+ *
+ * Exports all baseline-related functionality.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createMatcher = exports.partitionViolations = exports.filterNewViolations = exports.matchViolations = exports.isExistingViolation = exports.getViolationCounts = exports.getHashSet = exports.loadBaselineFromCwd = exports.loadBaseline = exports.normalizeContext = exports.extractContext = exports.computeHashWithMeta = exports.computeHash = void 0;
+// Hash computation
+var hash_1 = __nccwpck_require__(1555);
+Object.defineProperty(exports, "computeHash", ({ enumerable: true, get: function () { return hash_1.computeHash; } }));
+Object.defineProperty(exports, "computeHashWithMeta", ({ enumerable: true, get: function () { return hash_1.computeHashWithMeta; } }));
+Object.defineProperty(exports, "extractContext", ({ enumerable: true, get: function () { return hash_1.extractContext; } }));
+Object.defineProperty(exports, "normalizeContext", ({ enumerable: true, get: function () { return hash_1.normalizeContext; } }));
+// Loader
+var loader_1 = __nccwpck_require__(6920);
+Object.defineProperty(exports, "loadBaseline", ({ enumerable: true, get: function () { return loader_1.loadBaseline; } }));
+Object.defineProperty(exports, "loadBaselineFromCwd", ({ enumerable: true, get: function () { return loader_1.loadBaselineFromCwd; } }));
+Object.defineProperty(exports, "getHashSet", ({ enumerable: true, get: function () { return loader_1.getHashSet; } }));
+Object.defineProperty(exports, "getViolationCounts", ({ enumerable: true, get: function () { return loader_1.getViolationCounts; } }));
+// Matcher
+var matcher_1 = __nccwpck_require__(7029);
+Object.defineProperty(exports, "isExistingViolation", ({ enumerable: true, get: function () { return matcher_1.isExistingViolation; } }));
+Object.defineProperty(exports, "matchViolations", ({ enumerable: true, get: function () { return matcher_1.matchViolations; } }));
+Object.defineProperty(exports, "filterNewViolations", ({ enumerable: true, get: function () { return matcher_1.filterNewViolations; } }));
+Object.defineProperty(exports, "partitionViolations", ({ enumerable: true, get: function () { return matcher_1.partitionViolations; } }));
+Object.defineProperty(exports, "createMatcher", ({ enumerable: true, get: function () { return matcher_1.createMatcher; } }));
+
+
+/***/ }),
+
+/***/ 6920:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Baseline Loader
+ *
+ * Loads and validates the .hawky/baseline.json file.
+ * Handles missing baseline gracefully (returns null).
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.loadBaseline = loadBaseline;
+exports.loadBaselineFromCwd = loadBaselineFromCwd;
+exports.getHashSet = getHashSet;
+exports.getViolationCounts = getViolationCounts;
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+/** Default baseline file path relative to repo root */
+const DEFAULT_BASELINE_PATH = '.hawky/baseline.json';
+/** Valid gate names */
+const VALID_GATES = ['typescript', 'eslint', 'semgrep', 'gitleaks'];
+/**
+ * Validate that a violation object has all required fields.
+ */
+function isValidViolation(v) {
+    if (typeof v !== 'object' || v === null)
+        return false;
+    const obj = v;
+    const rule = obj['rule'];
+    const file = obj['file'];
+    const lineHint = obj['line_hint'];
+    const hash = obj['hash'];
+    const gate = obj['gate'];
+    const message = obj['message'];
+    const firstSeen = obj['first_seen'];
+    return (typeof rule === 'string' &&
+        typeof file === 'string' &&
+        typeof lineHint === 'number' &&
+        typeof hash === 'string' &&
+        typeof gate === 'string' &&
+        VALID_GATES.includes(gate) &&
+        typeof message === 'string' &&
+        typeof firstSeen === 'string');
+}
+/**
+ * Validate the baseline JSON structure.
+ */
+function validateBaseline(data) {
+    if (typeof data !== 'object' || data === null) {
+        return { valid: false, error: 'Baseline must be an object' };
+    }
+    const obj = data;
+    // Required fields
+    const version = obj['version'];
+    if (typeof version !== 'string') {
+        return { valid: false, error: 'Missing or invalid "version" field' };
+    }
+    const generatedAt = obj['generated_at'];
+    if (typeof generatedAt !== 'string') {
+        return { valid: false, error: 'Missing or invalid "generated_at" field' };
+    }
+    const branch = obj['branch'];
+    if (typeof branch !== 'string') {
+        return { valid: false, error: 'Missing or invalid "branch" field' };
+    }
+    const commit = obj['commit'];
+    if (typeof commit !== 'string') {
+        return { valid: false, error: 'Missing or invalid "commit" field' };
+    }
+    const violations = obj['violations'];
+    if (!Array.isArray(violations)) {
+        return { valid: false, error: 'Missing or invalid "violations" array' };
+    }
+    // Validate each violation
+    for (let i = 0; i < violations.length; i++) {
+        if (!isValidViolation(violations[i])) {
+            return { valid: false, error: `Invalid violation at index ${i}` };
+        }
+    }
+    // Build validated baseline
+    const baseline = {
+        version,
+        generated_at: generatedAt,
+        branch,
+        commit,
+        violations: violations,
+    };
+    // Optional summary
+    const summary = obj['summary'];
+    if (summary !== undefined) {
+        baseline.summary = summary;
+    }
+    // Optional suppressions
+    const suppressions = obj['suppressions'];
+    if (suppressions !== undefined) {
+        baseline.suppressions = suppressions;
+    }
+    return { valid: true, baseline };
+}
+/**
+ * Load the baseline file from the specified path.
+ *
+ * @param baselinePath - Path to the baseline file (relative to cwd or absolute)
+ * @returns BaselineLoadResult with the loaded baseline or error info
+ */
+function loadBaseline(baselinePath = DEFAULT_BASELINE_PATH) {
+    // Resolve to absolute path
+    const absolutePath = path.isAbsolute(baselinePath)
+        ? baselinePath
+        : path.resolve(process.cwd(), baselinePath);
+    // Check if file exists
+    if (!fs.existsSync(absolutePath)) {
+        return {
+            found: false,
+            baseline: null,
+            path: absolutePath,
+        };
+    }
+    try {
+        // Read and parse JSON
+        const content = fs.readFileSync(absolutePath, 'utf8');
+        const data = JSON.parse(content);
+        // Validate structure
+        const validation = validateBaseline(data);
+        if (!validation.valid || validation.baseline === undefined) {
+            return {
+                found: true,
+                baseline: null,
+                path: absolutePath,
+                error: validation.error ?? 'Validation failed',
+            };
+        }
+        return {
+            found: true,
+            baseline: validation.baseline,
+            path: absolutePath,
+        };
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        return {
+            found: true,
+            baseline: null,
+            path: absolutePath,
+            error: `Failed to parse baseline JSON: ${message}`,
+        };
+    }
+}
+/**
+ * Load baseline from cwd using default path.
+ * Convenience wrapper around loadBaseline().
+ */
+function loadBaselineFromCwd() {
+    return loadBaseline(DEFAULT_BASELINE_PATH);
+}
+/**
+ * Get a Set of all violation hashes from a baseline.
+ * Useful for fast lookup during violation matching.
+ *
+ * @param baseline - The baseline to extract hashes from
+ * @returns Set of violation hash strings
+ */
+function getHashSet(baseline) {
+    return new Set(baseline.violations.map((v) => v.hash));
+}
+/**
+ * Get violation count by gate.
+ *
+ * @param baseline - The baseline to analyze
+ * @returns Object with counts per gate
+ */
+function getViolationCounts(baseline) {
+    const counts = {
+        typescript: 0,
+        eslint: 0,
+        semgrep: 0,
+        gitleaks: 0,
+        total: baseline.violations.length,
+    };
+    for (const v of baseline.violations) {
+        const gate = v.gate;
+        if (gate === 'typescript')
+            counts.typescript++;
+        else if (gate === 'eslint')
+            counts.eslint++;
+        else if (gate === 'semgrep')
+            counts.semgrep++;
+        else if (gate === 'gitleaks')
+            counts.gitleaks++;
+    }
+    return counts;
+}
+
+
+/***/ }),
+
+/***/ 7029:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/**
+ * Baseline Matcher
+ *
+ * Matches violations against the baseline to determine if they are new or existing.
+ * Uses hash-based matching for stability across line number changes.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isExistingViolation = isExistingViolation;
+exports.matchViolations = matchViolations;
+exports.filterNewViolations = filterNewViolations;
+exports.partitionViolations = partitionViolations;
+exports.createMatcher = createMatcher;
+const hash_1 = __nccwpck_require__(1555);
+const loader_1 = __nccwpck_require__(6920);
+/**
+ * Check if a violation exists in the baseline.
+ *
+ * @param ruleId - The rule that was violated
+ * @param filePath - Path to the file containing the violation
+ * @param lineNumber - 1-indexed line number of the violation
+ * @param baseline - The baseline to check against
+ * @returns MatchResult indicating if the violation is new or existing
+ */
+function isExistingViolation(ruleId, filePath, lineNumber, baseline) {
+    const hash = (0, hash_1.computeHash)(ruleId, filePath, lineNumber);
+    // Find matching entry in baseline
+    const matchedEntry = baseline.violations.find((v) => v.hash === hash);
+    return {
+        isNew: !matchedEntry,
+        matchedEntry,
+        hash,
+    };
+}
+/**
+ * Batch check violations against baseline using a hash set for efficiency.
+ * Use this when checking many violations against the same baseline.
+ *
+ * @param violations - Array of violations to check
+ * @param baseline - The baseline to check against
+ * @returns Array of MatchResults in the same order as input
+ */
+function matchViolations(violations, baseline) {
+    const hashSet = (0, loader_1.getHashSet)(baseline);
+    const hashToEntry = new Map();
+    // Build hash -> entry map for fast lookup
+    for (const v of baseline.violations) {
+        hashToEntry.set(v.hash, v);
+    }
+    return violations.map(({ ruleId, filePath, lineNumber }) => {
+        const hash = (0, hash_1.computeHash)(ruleId, filePath, lineNumber);
+        const inBaseline = hashSet.has(hash);
+        return {
+            isNew: !inBaseline,
+            matchedEntry: inBaseline ? hashToEntry.get(hash) : undefined,
+            hash,
+        };
+    });
+}
+/**
+ * Filter violations to only new ones (not in baseline).
+ *
+ * @param violations - Array of violations with computed hashes
+ * @param baseline - The baseline to check against
+ * @returns Array of new violations
+ */
+function filterNewViolations(violations, baseline) {
+    const hashSet = (0, loader_1.getHashSet)(baseline);
+    return violations.filter((v) => !hashSet.has(v.hash));
+}
+/**
+ * Partition violations into new and existing.
+ *
+ * @param violations - Array of violations with computed hashes
+ * @param baseline - The baseline to check against
+ * @returns Object with newViolations and existingViolations arrays
+ */
+function partitionViolations(violations, baseline) {
+    const hashSet = (0, loader_1.getHashSet)(baseline);
+    const newViolations = [];
+    const existingViolations = [];
+    for (const v of violations) {
+        if (hashSet.has(v.hash)) {
+            existingViolations.push(v);
+        }
+        else {
+            newViolations.push(v);
+        }
+    }
+    return { newViolations, existingViolations };
+}
+/**
+ * Create a matcher function bound to a specific baseline.
+ * Useful when you need to check many violations without passing baseline each time.
+ *
+ * @param baseline - The baseline to bind
+ * @returns Function that checks if a violation is new
+ */
+function createMatcher(baseline) {
+    const hashSet = (0, loader_1.getHashSet)(baseline);
+    const hashToEntry = new Map();
+    for (const v of baseline.violations) {
+        hashToEntry.set(v.hash, v);
+    }
+    return (ruleId, filePath, lineNumber) => {
+        const hash = (0, hash_1.computeHash)(ruleId, filePath, lineNumber);
+        const inBaseline = hashSet.has(hash);
+        return {
+            isNew: !inBaseline,
+            matchedEntry: inBaseline ? hashToEntry.get(hash) : undefined,
+            hash,
+        };
+    };
+}
+
+
+/***/ }),
+
 /***/ 1954:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -26191,6 +26728,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(7484));
 const config_1 = __nccwpck_require__(9750);
+const baseline_1 = __nccwpck_require__(3907);
 /**
  * Read and parse action inputs from workflow
  */
@@ -26270,7 +26808,30 @@ async function run() {
             core.info(`  - ${gate}: ${status}, ${blocking}, timeout=${gateConfig.timeout}s`);
         }
         core.endGroup();
-        // TODO(@Luna, 2026-02-28): S098 - Load baseline for comparison
+        // S098: Load baseline for violation comparison
+        core.startGroup('Loading Baseline');
+        const baselineResult = (0, baseline_1.loadBaselineFromCwd)();
+        let baseline = null;
+        if (!baselineResult.found) {
+            core.info('No baseline found — all violations will be treated as new');
+        }
+        else if (baselineResult.error) {
+            core.warning(`Failed to load baseline: ${baselineResult.error}`);
+            core.info('Proceeding without baseline — all violations will be treated as new');
+        }
+        else if (baselineResult.baseline) {
+            baseline = baselineResult.baseline;
+            const counts = (0, baseline_1.getViolationCounts)(baseline);
+            core.info(`Baseline loaded: ${baselineResult.path}`);
+            core.info(`  - Total violations: ${counts.total}`);
+            core.info(`  - TypeScript: ${counts.typescript}`);
+            core.info(`  - ESLint: ${counts.eslint}`);
+            core.info(`  - Semgrep: ${counts.semgrep}`);
+            core.info(`  - Gitleaks: ${counts.gitleaks}`);
+            core.info(`  - Generated: ${baseline.generated_at}`);
+            core.info(`  - Branch: ${baseline.branch}`);
+        }
+        core.endGroup();
         // TODO(@Luna, 2026-02-28): S099 - Load hawkyignore patterns
         // TODO(@Luna, 2026-02-28): S100-S103 - Run individual gates
         // TODO(@Luna, 2026-02-28): S104 - Generate PR comment

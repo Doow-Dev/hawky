@@ -7,6 +7,12 @@
 
 import * as core from '@actions/core';
 import { loadConfigFromCwd, GATE_NAMES, type HawkyConfig, type GateName } from './config';
+import {
+  loadBaselineFromCwd,
+  getViolationCounts,
+  type Baseline,
+  type BaselineLoadResult,
+} from './baseline';
 
 /**
  * Parsed action inputs
@@ -112,7 +118,30 @@ async function run(): Promise<void> {
     }
     core.endGroup();
 
-    // TODO(@Luna, 2026-02-28): S098 - Load baseline for comparison
+    // S098: Load baseline for violation comparison
+    core.startGroup('Loading Baseline');
+    const baselineResult: BaselineLoadResult = loadBaselineFromCwd();
+    let baseline: Baseline | null = null;
+
+    if (!baselineResult.found) {
+      core.info('No baseline found — all violations will be treated as new');
+    } else if (baselineResult.error) {
+      core.warning(`Failed to load baseline: ${baselineResult.error}`);
+      core.info('Proceeding without baseline — all violations will be treated as new');
+    } else if (baselineResult.baseline) {
+      baseline = baselineResult.baseline;
+      const counts = getViolationCounts(baseline);
+      core.info(`Baseline loaded: ${baselineResult.path}`);
+      core.info(`  - Total violations: ${counts.total}`);
+      core.info(`  - TypeScript: ${counts.typescript}`);
+      core.info(`  - ESLint: ${counts.eslint}`);
+      core.info(`  - Semgrep: ${counts.semgrep}`);
+      core.info(`  - Gitleaks: ${counts.gitleaks}`);
+      core.info(`  - Generated: ${baseline.generated_at}`);
+      core.info(`  - Branch: ${baseline.branch}`);
+    }
+    core.endGroup();
+
     // TODO(@Luna, 2026-02-28): S099 - Load hawkyignore patterns
     // TODO(@Luna, 2026-02-28): S100-S103 - Run individual gates
     // TODO(@Luna, 2026-02-28): S104 - Generate PR comment
