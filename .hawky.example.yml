@@ -39,6 +39,13 @@ gates:
     blocking: false    # Non-blocking: warnings shown but don't fail the PR
     timeout: 300       # Default: 300 (5 min)
 
+  # Semgrep security scanning (S009)
+  semgrep:
+    enabled: true
+    blocking: true     # High-severity findings block merge by default
+    timeout: 600       # Default: 600 (10 min)
+    # rulesets: "p/security-audit p/typescript"  # Space-separated ruleset IDs. Default: p/security-audit
+
 # Example: Disable ESLint temporarily during migration
 # gates:
 #   eslint:

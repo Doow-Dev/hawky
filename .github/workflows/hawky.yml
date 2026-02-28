@@ -42,6 +42,11 @@ env:
   HAWKY_GATE_ESLINT_ENABLED: 'true'
   HAWKY_GATE_ESLINT_BLOCKING: 'true'
   HAWKY_GATE_ESLINT_TIMEOUT: '300'
+  # S009: Semgrep security scanning
+  HAWKY_GATE_SEMGREP_ENABLED: 'true'
+  HAWKY_GATE_SEMGREP_BLOCKING: 'true'
+  HAWKY_GATE_SEMGREP_TIMEOUT: '600'
+  HAWKY_GATE_SEMGREP_RULESETS: 'p/security-audit'
 
 # Explicit minimal permissions
 permissions:
@@ -192,7 +197,7 @@ jobs:
             }
 
             // Per-gate settings
-            const gates = ['typescript', 'build', 'test', 'eslint'];
+            const gates = ['typescript', 'build', 'test', 'eslint', 'semgrep'];
             gates.forEach(gate => {
               const gateConfig = config[gate] || {};
               const prefix = 'HAWKY_GATE_' + gate.toUpperCase();
@@ -208,6 +213,10 @@ jobs:
               }
               if (gateConfig.command !== undefined) {
                 envVars.push(prefix + '_COMMAND=' + gateConfig.command);
+              }
+              // S009: Semgrep-specific rulesets setting
+              if (gateConfig.rulesets !== undefined) {
+                envVars.push(prefix + '_RULESETS=' + gateConfig.rulesets);
               }
             });
 
@@ -856,6 +865,274 @@ jobs:
             echo "eslint_status=passed" >> $GITHUB_OUTPUT
           fi
 
+      # S009: Semgrep Security Scanning Gate
+      # Runs Semgrep on changed files with security rulesets
+      # Respects HAWKY_GATE_SEMGREP_ENABLED and blocking configs
+      - name: Semgrep Security Gate
+        id: semgrep
+        if: ${{ env.HAWKY_GATE_SEMGREP_ENABLED != 'false' && ((steps.typecheck.outputs.tsc_status != 'failed' || env.HAWKY_GATE_TYPESCRIPT_BLOCKING != 'true') && (steps.build.outputs.build_status != 'failed' || env.HAWKY_GATE_BUILD_BLOCKING != 'true') && (steps.test.outputs.test_status != 'failed' || env.HAWKY_GATE_TEST_BLOCKING != 'true') && (steps.eslint.outputs.eslint_status != 'failed' || env.HAWKY_GATE_ESLINT_BLOCKING != 'true') || env.HAWKY_FAIL_FAST != 'true') }}
+        run: |
+          echo "## Semgrep Security Gate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check if Semgrep is available
+          if ! command -v semgrep &> /dev/null; then
+            # Try to install via pip
+            echo "Semgrep not found, attempting to install..."
+            if command -v pip3 &> /dev/null; then
+              pip3 install semgrep --quiet 2>/dev/null || pip install semgrep --quiet 2>/dev/null || true
+            elif command -v pip &> /dev/null; then
+              pip install semgrep --quiet 2>/dev/null || true
+            fi
+          fi
+
+          # Re-check if Semgrep is now available
+          if ! command -v semgrep &> /dev/null; then
+            echo "Semgrep not available — skipping security scan"
+            echo ":white_check_mark: **Skipped** — Semgrep not available" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Install Semgrep to enable security scanning: \`pip install semgrep\`_" >> $GITHUB_STEP_SUMMARY
+            echo "semgrep_status=skipped" >> $GITHUB_OUTPUT
+            echo "semgrep_high=0" >> $GITHUB_OUTPUT
+            echo "semgrep_medium=0" >> $GITHUB_OUTPUT
+            echo "semgrep_low=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          SEMGREP_VERSION=$(semgrep --version 2>/dev/null || echo "unknown")
+          echo "Semgrep version: $SEMGREP_VERSION"
+          echo "**Semgrep version:** \`$SEMGREP_VERSION\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get changed files in PR (code files only)
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD | grep -E '\.(js|jsx|ts|tsx|py|java|go|rb|php|c|cpp|cs|rs|swift|kt|scala)$' || echo "")
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No scannable files changed in PR — skipping Semgrep"
+            echo ":white_check_mark: **Skipped** — No scannable files changed in PR" >> $GITHUB_STEP_SUMMARY
+            echo "semgrep_status=skipped" >> $GITHUB_OUTPUT
+            echo "semgrep_high=0" >> $GITHUB_OUTPUT
+            echo "semgrep_medium=0" >> $GITHUB_OUTPUT
+            echo "semgrep_low=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Count changed files
+          FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | xargs)
+          echo "Scanning $FILE_COUNT changed file(s)..."
+          echo "**Files scanned:** $FILE_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Build --include patterns for changed files only
+          INCLUDE_ARGS=""
+          for file in $CHANGED_FILES; do
+            if [ -f "$file" ]; then
+              INCLUDE_ARGS="$INCLUDE_ARGS --include $file"
+            fi
+          done
+
+          if [ -z "$(echo "$INCLUDE_ARGS" | xargs)" ]; then
+            echo "All changed files were deleted — skipping Semgrep"
+            echo ":white_check_mark: **Skipped** — All changed files were deleted" >> $GITHUB_STEP_SUMMARY
+            echo "semgrep_status=skipped" >> $GITHUB_OUTPUT
+            echo "semgrep_high=0" >> $GITHUB_OUTPUT
+            echo "semgrep_medium=0" >> $GITHUB_OUTPUT
+            echo "semgrep_low=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Determine rulesets to use
+          RULESETS="${HAWKY_GATE_SEMGREP_RULESETS:-p/security-audit}"
+          echo "**Rulesets:** \`$RULESETS\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Build ruleset args
+          RULESET_ARGS=""
+          for ruleset in $RULESETS; do
+            RULESET_ARGS="$RULESET_ARGS --config $ruleset"
+          done
+
+          # Run Semgrep with JSON output
+          SEMGREP_START=$(date +%s)
+          set +e
+          SEMGREP_OUTPUT=$(semgrep scan $RULESET_ARGS --json $INCLUDE_ARGS . 2>&1)
+          SEMGREP_EXIT_CODE=$?
+          set -e
+          SEMGREP_END=$(date +%s)
+          SEMGREP_TIME=$((SEMGREP_END - SEMGREP_START))
+
+          echo "**Scan time:** ${SEMGREP_TIME}s" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Output scan time for summary
+          echo "semgrep_time=${SEMGREP_TIME}s" >> $GITHUB_OUTPUT
+
+          # Parse JSON output
+          # Semgrep JSON format: { results: [{ check_id, path, start: {line, col}, extra: {severity, message} }], errors: [] }
+          HIGH_COUNT=0
+          MEDIUM_COUNT=0
+          LOW_COUNT=0
+          INFO_COUNT=0
+
+          # Check if output is valid JSON
+          if echo "$SEMGREP_OUTPUT" | node -e "JSON.parse(require('fs').readFileSync(0, 'utf8'))" 2>/dev/null; then
+            # Parse with Node.js for reliable JSON handling
+            PARSED=$(echo "$SEMGREP_OUTPUT" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              let high = 0, medium = 0, low = 0, info = 0;
+              const annotations = [];
+
+              (data.results || []).forEach(result => {
+                const severity = (result.extra?.severity || 'INFO').toUpperCase();
+                const file = result.path;
+                const line = result.start?.line || 1;
+                const col = result.start?.col || 1;
+                const ruleId = result.check_id || 'unknown';
+                const message = (result.extra?.message || 'Security finding').replace(/'/g, \"'\").replace(/\n/g, ' ');
+
+                // Count by severity
+                if (severity === 'ERROR' || severity === 'HIGH') high++;
+                else if (severity === 'WARNING' || severity === 'MEDIUM') medium++;
+                else if (severity === 'LOW') low++;
+                else info++;
+
+                // Map severity to annotation type
+                const annotationType = (severity === 'ERROR' || severity === 'HIGH') ? 'error' : 'warning';
+
+                annotations.push({ severity: annotationType, file, line, col, ruleId, message, originalSeverity: severity });
+              });
+
+              console.log(JSON.stringify({ high, medium, low, info, annotations }));
+            ")
+
+            HIGH_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).high)")
+            MEDIUM_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).medium)")
+            LOW_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).low)")
+            INFO_COUNT=$(echo "$PARSED" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf8')).info)")
+
+            # Emit GitHub annotations
+            echo "$PARSED" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              data.annotations.forEach(a => {
+                console.log('::' + a.severity + ' file=' + a.file + ',line=' + a.line + ',col=' + a.col + ',title=Semgrep [' + a.originalSeverity + '] ' + a.ruleId + '::' + a.message);
+              });
+            "
+          else
+            # JSON parsing failed - check for Semgrep errors
+            echo "Semgrep output was not valid JSON — check for errors"
+            echo "::error::Semgrep failed to produce valid output. Check configuration."
+            echo ":x: **Failed** — Semgrep error" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Output" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "$SEMGREP_OUTPUT" | tail -50 >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "semgrep_status=failed" >> $GITHUB_OUTPUT
+            echo "semgrep_high=0" >> $GITHUB_OUTPUT
+            echo "semgrep_medium=0" >> $GITHUB_OUTPUT
+            echo "semgrep_low=0" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          TOTAL_FINDINGS=$((HIGH_COUNT + MEDIUM_COUNT + LOW_COUNT + INFO_COUNT))
+
+          # Summary table
+          echo "### Security Findings" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| :red_circle: High/Error | $HIGH_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| :orange_circle: Medium/Warning | $MEDIUM_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| :yellow_circle: Low | $LOW_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| :white_circle: Info | $INFO_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Store counts for future gates
+          echo "semgrep_high=$HIGH_COUNT" >> $GITHUB_OUTPUT
+          echo "semgrep_medium=$MEDIUM_COUNT" >> $GITHUB_OUTPUT
+          echo "semgrep_low=$LOW_COUNT" >> $GITHUB_OUTPUT
+          echo "semgrep_info=$INFO_COUNT" >> $GITHUB_OUTPUT
+
+          # Handle results - high severity findings block merge
+          if [ "$HIGH_COUNT" -gt 0 ]; then
+            echo ":x: **Failed** — $HIGH_COUNT high-severity finding(s)" >> $GITHUB_STEP_SUMMARY
+            echo "semgrep_status=failed" >> $GITHUB_OUTPUT
+
+            # Show detailed findings in summary
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### High-Severity Findings" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "$SEMGREP_OUTPUT" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              (data.results || []).forEach(result => {
+                const severity = (result.extra?.severity || 'INFO').toUpperCase();
+                if (severity === 'ERROR' || severity === 'HIGH') {
+                  console.log('**' + result.path + ':' + (result.start?.line || 1) + '** — ' + result.check_id);
+                  console.log('  ' + (result.extra?.message || 'Security finding').substring(0, 200));
+                  console.log('');
+                }
+              });
+            " >> $GITHUB_STEP_SUMMARY
+
+            echo ""
+            echo "Semgrep failed: $HIGH_COUNT high-severity finding(s)"
+            exit 1
+          fi
+
+          if [ "$MEDIUM_COUNT" -gt 0 ]; then
+            echo ":white_check_mark: **Passed** — $MEDIUM_COUNT medium-severity finding(s) (warnings)" >> $GITHUB_STEP_SUMMARY
+            echo "::warning::Semgrep found $MEDIUM_COUNT medium-severity finding(s)"
+            echo "semgrep_status=passed" >> $GITHUB_OUTPUT
+
+            # Show warnings in collapsible section
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Medium-Severity Findings ($MEDIUM_COUNT)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "$SEMGREP_OUTPUT" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              (data.results || []).forEach(result => {
+                const severity = (result.extra?.severity || 'INFO').toUpperCase();
+                if (severity === 'WARNING' || severity === 'MEDIUM') {
+                  console.log('**' + result.path + ':' + (result.start?.line || 1) + '** — ' + result.check_id);
+                  console.log('  ' + (result.extra?.message || 'Security finding').substring(0, 200));
+                  console.log('');
+                }
+              });
+            " >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+            echo "Semgrep passed with $MEDIUM_COUNT medium-severity warning(s)"
+          elif [ "$LOW_COUNT" -gt 0 ] || [ "$INFO_COUNT" -gt 0 ]; then
+            echo ":white_check_mark: **Passed** — $LOW_COUNT low + $INFO_COUNT info finding(s)" >> $GITHUB_STEP_SUMMARY
+            echo "semgrep_status=passed" >> $GITHUB_OUTPUT
+
+            # Show low/info in collapsible section
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Low/Info Findings ($((LOW_COUNT + INFO_COUNT)))</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "$SEMGREP_OUTPUT" | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+              (data.results || []).forEach(result => {
+                const severity = (result.extra?.severity || 'INFO').toUpperCase();
+                if (severity === 'LOW' || severity === 'INFO') {
+                  console.log('**' + result.path + ':' + (result.start?.line || 1) + '** — ' + result.check_id);
+                  console.log('  ' + (result.extra?.message || 'Security finding').substring(0, 200));
+                  console.log('');
+                }
+              });
+            " >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+            echo "Semgrep passed with $LOW_COUNT low + $INFO_COUNT info finding(s)"
+          else
+            echo ":white_check_mark: **Passed** — No security findings" >> $GITHUB_STEP_SUMMARY
+            echo "Semgrep passed — no findings"
+            echo "semgrep_status=passed" >> $GITHUB_OUTPUT
+          fi
+
       # S006: Gate Report Summary
       # Posts/updates a PR comment with aggregated gate results
       # S007: Now includes fail-fast skip detection
@@ -875,6 +1152,9 @@ jobs:
           TEST_BLOCKING: ${{ env.HAWKY_GATE_TEST_BLOCKING }}
           ESLINT_ENABLED: ${{ env.HAWKY_GATE_ESLINT_ENABLED }}
           ESLINT_BLOCKING: ${{ env.HAWKY_GATE_ESLINT_BLOCKING }}
+          # S009: Semgrep config
+          SEMGREP_ENABLED: ${{ env.HAWKY_GATE_SEMGREP_ENABLED }}
+          SEMGREP_BLOCKING: ${{ env.HAWKY_GATE_SEMGREP_BLOCKING }}
           # Gate outputs
           TSC_STATUS: ${{ steps.typecheck.outputs.tsc_status || 'unknown' }}
           TSC_ERRORS: ${{ steps.typecheck.outputs.tsc_errors || '0' }}
@@ -895,6 +1175,13 @@ jobs:
           ESLINT_WARNINGS: ${{ steps.eslint.outputs.eslint_warnings || '0' }}
           ESLINT_TIME: ${{ steps.eslint.outputs.eslint_time || 'N/A' }}
           ESLINT_STEP_RAN: ${{ steps.eslint.outcome != 'skipped' }}
+          # S009: Semgrep outputs
+          SEMGREP_STATUS: ${{ steps.semgrep.outputs.semgrep_status || 'unknown' }}
+          SEMGREP_HIGH: ${{ steps.semgrep.outputs.semgrep_high || '0' }}
+          SEMGREP_MEDIUM: ${{ steps.semgrep.outputs.semgrep_medium || '0' }}
+          SEMGREP_LOW: ${{ steps.semgrep.outputs.semgrep_low || '0' }}
+          SEMGREP_TIME: ${{ steps.semgrep.outputs.semgrep_time || 'N/A' }}
+          SEMGREP_STEP_RAN: ${{ steps.semgrep.outcome != 'skipped' }}
         run: |
           # Determine overall status
           OVERALL_STATUS="passed"
@@ -956,8 +1243,22 @@ jobs:
             fi
           fi
 
+          # S009: Semgrep gate: check disabled, then fail-fast, then failure
+          if [ "$SEMGREP_ENABLED" = "false" ]; then
+            SEMGREP_STATUS="disabled"
+            DISABLED_GATES="$DISABLED_GATES Semgrep"
+          elif [ "$SEMGREP_STEP_RAN" = "false" ] && [ "$FAIL_FAST_ENABLED" = "true" ] && ([ "$TSC_STATUS" = "failed" ] && [ "$TSC_BLOCKING" != "false" ] || [ "$BUILD_STATUS" = "failed" ] && [ "$BUILD_BLOCKING" != "false" ] || [ "$TEST_STATUS" = "failed" ] && [ "$TEST_BLOCKING" != "false" ] || [ "$ESLINT_STATUS" = "failed" ] && [ "$ESLINT_BLOCKING" != "false" ]); then
+            SEMGREP_STATUS="fail-fast"
+            FAIL_FAST_SKIPPED="$FAIL_FAST_SKIPPED Semgrep"
+          elif [ "$SEMGREP_STATUS" = "failed" ]; then
+            if [ "$SEMGREP_BLOCKING" != "false" ]; then
+              OVERALL_STATUS="failed"
+              FAILED_GATES="$FAILED_GATES Semgrep"
+            fi
+          fi
+
           # Handle unknown statuses (step ran but produced no output - unusual)
-          if [ "$TSC_STATUS" = "unknown" ] || [ "$BUILD_STATUS" = "unknown" ] || [ "$TEST_STATUS" = "unknown" ] || [ "$ESLINT_STATUS" = "unknown" ]; then
+          if [ "$TSC_STATUS" = "unknown" ] || [ "$BUILD_STATUS" = "unknown" ] || [ "$TEST_STATUS" = "unknown" ] || [ "$ESLINT_STATUS" = "unknown" ] || [ "$SEMGREP_STATUS" = "unknown" ]; then
             if [ "$OVERALL_STATUS" != "failed" ]; then
               OVERALL_STATUS="partial"
             fi
@@ -1003,6 +1304,7 @@ jobs:
           echo "| Build | $(status_icon "$BUILD_STATUS") $BUILD_STATUS | ${BUILD_WARNINGS} warning(s) | $BUILD_TIME |" >> /tmp/hawky-comment.md
           echo "| Test | $(status_icon "$TEST_STATUS") $TEST_STATUS | ${TEST_PASSED}/${TEST_TOTAL} passed, ${TEST_FAILED} failed | $TEST_TIME |" >> /tmp/hawky-comment.md
           echo "| ESLint | $(status_icon "$ESLINT_STATUS") $ESLINT_STATUS | ${ESLINT_ERRORS} error(s), ${ESLINT_WARNINGS} warning(s) | $ESLINT_TIME |" >> /tmp/hawky-comment.md
+          echo "| Semgrep | $(status_icon "$SEMGREP_STATUS") $SEMGREP_STATUS | ${SEMGREP_HIGH} high, ${SEMGREP_MEDIUM} medium, ${SEMGREP_LOW} low | $SEMGREP_TIME |" >> /tmp/hawky-comment.md
           echo "" >> /tmp/hawky-comment.md
 
           # Add details sections for failures
@@ -1025,6 +1327,10 @@ jobs:
 
             if [ "$ESLINT_STATUS" = "failed" ]; then
               echo "- [ESLint Errors]($WORKFLOW_URL) — $ESLINT_ERRORS lint error(s)" >> /tmp/hawky-comment.md
+            fi
+
+            if [ "$SEMGREP_STATUS" = "failed" ]; then
+              echo "- [Semgrep Findings]($WORKFLOW_URL) — $SEMGREP_HIGH high-severity finding(s)" >> /tmp/hawky-comment.md
             fi
 
             echo "" >> /tmp/hawky-comment.md
@@ -1064,6 +1370,7 @@ jobs:
           [ "$BUILD_STATUS" = "skipped" ] && SKIPPED_GATES="$SKIPPED_GATES Build,"
           [ "$TEST_STATUS" = "skipped" ] && SKIPPED_GATES="$SKIPPED_GATES Test,"
           [ "$ESLINT_STATUS" = "skipped" ] && SKIPPED_GATES="$SKIPPED_GATES ESLint,"
+          [ "$SEMGREP_STATUS" = "skipped" ] && SKIPPED_GATES="$SKIPPED_GATES Semgrep,"
 
           if [ -n "$SKIPPED_GATES" ]; then
             # Remove trailing comma
