@@ -25,6 +25,7 @@ import {
   typescriptGate,
   eslintGate,
   semgrepGate,
+  gitleaksGate,
   violationToAnnotation,
   type GateResult,
   type Violation,
@@ -343,8 +344,30 @@ async function run(): Promise<void> {
         if (result.violations.length > 0) {
           result = filterViolations(result, baseline, ignorePatterns, cwd);
         }
+      } else if (gateName === 'gitleaks') {
+        // S103: Gitleaks Gate
+        result = await gitleaksGate.run({
+          cwd,
+          timeoutMs,
+          createAnnotations: true,
+        });
+
+        // Apply hawkyignore filtering (for test fixtures)
+        // IMPORTANT: Unlike other gates, we should log a WARNING if secrets are in baseline
+        // Secrets should never be "grandfathered" — they need to be removed or rotated
+        if (result.violations.length > 0) {
+          result = filterViolations(result, baseline, ignorePatterns, cwd);
+
+          // If any secrets were filtered by baseline, log a security warning
+          if (result.existingViolations > 0) {
+            core.warning(
+              `SECURITY CONCERN: ${result.existingViolations} secret(s) are in baseline. ` +
+              `Secrets should NEVER be grandfathered — they must be rotated immediately.`
+            );
+          }
+        }
       } else {
-        // TODO(@Luna, 2026-02-28): S103 - Gitleaks gate
+        // Unsupported gate (build, test not yet implemented)
         result = {
           gate: gateName,
           status: 'skip',

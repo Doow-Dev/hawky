@@ -39,3 +39,11 @@ export {
   getChangedFiles as semgrepGetChangedFiles,
   violationToAnnotation as semgrepViolationToAnnotation,
 } from './semgrep';
+
+// Gitleaks Gate
+export {
+  gitleaksGate,
+  parseGitleaksOutput,
+  getChangedFiles as gitleaksGetChangedFiles,
+  violationToAnnotation as gitleaksViolationToAnnotation,
+} from './gitleaks';
