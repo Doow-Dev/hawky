@@ -249,6 +249,177 @@ jobs:
           fi
           echo "Build passed in ${BUILD_TIME}s ($WARNING_COUNT warnings)"
 
+      # S004: Test Gate
+      - name: Test Gate
+        id: test
+        run: |
+          echo "## Test Gate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          TEST_CMD=""
+          TEST_SOURCE=""
+
+          # Priority 1: Check .claude/COMMANDS.md for test command
+          if [ -f ".claude/COMMANDS.md" ]; then
+            # Look for test command in COMMANDS.md (format: "test: <command>" or "Test: <command>")
+            COMMANDS_TEST=$(grep -iE "^(test|Test):\s*" .claude/COMMANDS.md | head -1 | sed 's/^[Tt]est:\s*//' | xargs)
+            if [ -n "$COMMANDS_TEST" ]; then
+              TEST_CMD="$COMMANDS_TEST"
+              TEST_SOURCE=".claude/COMMANDS.md"
+            fi
+          fi
+
+          # Priority 2: Check package.json for test script
+          if [ -z "$TEST_CMD" ] && [ -f "package.json" ]; then
+            # Check if test script exists in package.json (and isn't the default error script)
+            TEST_SCRIPT=$(node -e "const pkg = require('./package.json'); if (pkg.scripts && pkg.scripts.test && !pkg.scripts.test.includes('Error: no test specified')) { console.log(pkg.scripts.test); }" 2>/dev/null || echo "")
+            if [ -n "$TEST_SCRIPT" ]; then
+              TEST_CMD="npm test"
+              TEST_SOURCE="package.json"
+            fi
+          fi
+
+          # Skip if no test command found
+          if [ -z "$TEST_CMD" ]; then
+            echo "No test command found — skipping test gate"
+            echo ":white_check_mark: **Skipped** — No test command found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Checked: .claude/COMMANDS.md, package.json_" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "Test command: $TEST_CMD (from $TEST_SOURCE)"
+          echo "**Source:** \`$TEST_SOURCE\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Command:** \`$TEST_CMD\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Run tests and capture output
+          TEST_START=$(date +%s)
+          set +e
+          TEST_OUTPUT=$(eval "$TEST_CMD" 2>&1)
+          TEST_EXIT_CODE=$?
+          set -e
+          TEST_END=$(date +%s)
+          TEST_TIME=$((TEST_END - TEST_START))
+
+          echo "**Test time:** ${TEST_TIME}s" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Parse test results - support multiple test runners
+          # Jest/Vitest format: "Tests: X passed, Y failed, Z skipped, N total"
+          # or "Test Suites: ..." followed by "Tests: ..."
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+          TOTAL=0
+
+          # Try Jest/Vitest format first
+          if echo "$TEST_OUTPUT" | grep -qE "Tests:.*passed"; then
+            PASSED=$(echo "$TEST_OUTPUT" | grep -oE "([0-9]+) passed" | grep -oE "[0-9]+" | tail -1 || echo "0")
+            FAILED=$(echo "$TEST_OUTPUT" | grep -oE "([0-9]+) failed" | grep -oE "[0-9]+" | tail -1 || echo "0")
+            SKIPPED=$(echo "$TEST_OUTPUT" | grep -oE "([0-9]+) (skipped|todo)" | grep -oE "[0-9]+" | tail -1 || echo "0")
+            TOTAL=$(echo "$TEST_OUTPUT" | grep -oE "([0-9]+) total" | grep -oE "[0-9]+" | tail -1 || echo "0")
+          # Try TAP format (used by many Node test runners)
+          elif echo "$TEST_OUTPUT" | grep -qE "^(ok|not ok) [0-9]+"; then
+            PASSED=$(echo "$TEST_OUTPUT" | grep -cE "^ok [0-9]+" || echo "0")
+            FAILED=$(echo "$TEST_OUTPUT" | grep -cE "^not ok [0-9]+" || echo "0")
+            SKIPPED=$(echo "$TEST_OUTPUT" | grep -cE "^ok [0-9]+.*# (skip|todo)" || echo "0")
+            TOTAL=$((PASSED + FAILED))
+          # Try Mocha format: "X passing" "Y failing"
+          elif echo "$TEST_OUTPUT" | grep -qE "[0-9]+ passing"; then
+            PASSED=$(echo "$TEST_OUTPUT" | grep -oE "([0-9]+) passing" | grep -oE "[0-9]+" | tail -1 || echo "0")
+            FAILED=$(echo "$TEST_OUTPUT" | grep -oE "([0-9]+) failing" | grep -oE "[0-9]+" | tail -1 || echo "0")
+            SKIPPED=$(echo "$TEST_OUTPUT" | grep -oE "([0-9]+) pending" | grep -oE "[0-9]+" | tail -1 || echo "0")
+            TOTAL=$((PASSED + FAILED + SKIPPED))
+          fi
+
+          # Ensure numeric values
+          PASSED=${PASSED:-0}
+          FAILED=${FAILED:-0}
+          SKIPPED=${SKIPPED:-0}
+          TOTAL=${TOTAL:-0}
+
+          echo "### Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skipped | $SKIPPED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Extract failed test names and create annotations
+          if [ "$FAILED" -gt 0 ] || [ "$TEST_EXIT_CODE" -ne 0 ]; then
+            echo "### Failed Tests" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Parse failed test names - support Jest/Vitest format
+            # Look for "FAIL" lines or "✕" or "✖" markers
+            FAILED_TESTS=$(echo "$TEST_OUTPUT" | grep -E "(FAIL |✕|✖|not ok [0-9]+)" | head -20)
+
+            if [ -n "$FAILED_TESTS" ]; then
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "$FAILED_TESTS" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+              # Create GitHub annotations for failed tests
+              # Parse Jest format: "FAIL path/to/file.test.ts"
+              echo "$TEST_OUTPUT" | grep -E "^FAIL " | while IFS= read -r line; do
+                FILE=$(echo "$line" | sed 's/^FAIL //' | xargs)
+                if [ -f "$FILE" ]; then
+                  echo "::error file=$FILE,title=Test Failed::Test suite failed"
+                fi
+              done
+
+              # Parse individual test failures - "● Test Suite › test name"
+              echo "$TEST_OUTPUT" | grep -E "^[[:space:]]*●" | while IFS= read -r line; do
+                TEST_NAME=$(echo "$line" | sed 's/^[[:space:]]*● //' | xargs)
+                echo "::error title=Test Failed::$TEST_NAME"
+              done
+            else
+              # Fallback: show last 50 lines of output
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "$TEST_OUTPUT" | tail -50 >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo ":x: **Failed** — $FAILED test(s) failed" >> $GITHUB_STEP_SUMMARY
+            echo ""
+            echo "Tests failed: $FAILED failed, $PASSED passed, $SKIPPED skipped"
+            exit 1
+          fi
+
+          # Check for coverage info
+          COVERAGE_LINE=$(echo "$TEST_OUTPUT" | grep -E "(Coverage|coverage|All files)" | head -1 || echo "")
+          if [ -n "$COVERAGE_LINE" ]; then
+            echo "### Coverage" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            # Try to extract coverage table
+            COVERAGE_TABLE=$(echo "$TEST_OUTPUT" | grep -A 20 "Coverage\|All files" | head -25)
+            if [ -n "$COVERAGE_TABLE" ]; then
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "$COVERAGE_TABLE" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Compare test count to main branch (if possible)
+          # Store current test count for future comparison
+          echo "test_total=$TOTAL" >> $GITHUB_OUTPUT
+          echo "test_passed=$PASSED" >> $GITHUB_OUTPUT
+          echo "test_failed=$FAILED" >> $GITHUB_OUTPUT
+          echo "test_skipped=$SKIPPED" >> $GITHUB_OUTPUT
+
+          echo ":white_check_mark: **Passed** — $PASSED tests passed in ${TEST_TIME}s" >> $GITHUB_STEP_SUMMARY
+          if [ "$SKIPPED" -gt 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_$SKIPPED test(s) skipped_" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "Tests passed: $PASSED passed, $SKIPPED skipped in ${TEST_TIME}s"
+
       # Scaffold placeholder - future gates will build on this
       - name: Hawky Scaffold Ready
         run: |
