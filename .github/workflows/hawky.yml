@@ -415,6 +415,338 @@ VIOLATION_EOF
 
           echo "violations_count=$VIOLATIONS_COUNT" >> $GITHUB_OUTPUT
 
+      # S083: Generate Onboarding Report
+      - name: Generate Onboarding Report
+        if: steps.baseline.outputs.baseline_valid == 'true'
+        id: onboarding-report
+        run: |
+          BASELINE_FILE=".hawky/baseline.json"
+          REPORT_FILE=".hawky/onboarding-report.md"
+
+          if [ ! -f "$BASELINE_FILE" ]; then
+            echo "No baseline file found, skipping report generation"
+            echo "report_generated=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Generate the onboarding report using Node.js
+          node << 'REPORT_SCRIPT'
+          const fs = require('fs');
+
+          const baseline = JSON.parse(fs.readFileSync('.hawky/baseline.json', 'utf8'));
+          const violations = baseline.violations || [];
+          const summary = baseline.summary || {};
+
+          // Calculate severity distribution
+          // For now, we categorize by gate:
+          // - Security (semgrep + gitleaks) = high priority
+          // - TypeScript = medium priority (type safety)
+          // - ESLint = lower priority (style/best practices)
+          const severityMap = {
+            security: violations.filter(v => v.gate === 'semgrep' || v.gate === 'gitleaks'),
+            typescript: violations.filter(v => v.gate === 'typescript'),
+            eslint: violations.filter(v => v.gate === 'eslint')
+          };
+
+          // Find top files with most violations
+          const fileViolations = {};
+          violations.forEach(v => {
+            fileViolations[v.file] = (fileViolations[v.file] || 0) + 1;
+          });
+
+          const topFiles = Object.entries(fileViolations)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10);
+
+          // Estimate effort (rough: 5 min per violation)
+          const totalMinutes = violations.length * 5;
+          const hours = Math.floor(totalMinutes / 60);
+          const minutes = totalMinutes % 60;
+          const effortEstimate = hours > 0 ? `~${hours}h ${minutes}m` : `~${minutes}m`;
+
+          // Generate recommendations
+          const recommendations = [];
+
+          if (severityMap.security.length > 0) {
+            recommendations.push({
+              priority: 1,
+              title: 'Fix Security Issues First',
+              description: `You have ${severityMap.security.length} security-related findings. These should be addressed immediately as they may expose vulnerabilities.`,
+              action: 'Review Semgrep and Gitleaks findings in the baseline'
+            });
+          }
+
+          if (severityMap.typescript.length > 20) {
+            recommendations.push({
+              priority: 2,
+              title: 'Enable Strict TypeScript Incrementally',
+              description: `${severityMap.typescript.length} TypeScript errors. Consider using "// @ts-expect-error" comments for complex cases and tackling one file at a time.`,
+              action: 'Start with shared utility files, then expand outward'
+            });
+          } else if (severityMap.typescript.length > 0) {
+            recommendations.push({
+              priority: 2,
+              title: 'Fix TypeScript Errors',
+              description: `${severityMap.typescript.length} TypeScript errors are manageable in a focused session.`,
+              action: 'Address these before adding new features'
+            });
+          }
+
+          if (severityMap.eslint.length > 50) {
+            recommendations.push({
+              priority: 3,
+              title: 'Auto-fix ESLint Issues',
+              description: `${severityMap.eslint.length} ESLint issues. Many can be auto-fixed with "eslint --fix".`,
+              action: 'Run "npx eslint --fix ." to auto-fix what is possible'
+            });
+          } else if (severityMap.eslint.length > 0) {
+            recommendations.push({
+              priority: 3,
+              title: 'Clean Up Linting Issues',
+              description: `${severityMap.eslint.length} ESLint issues. Consider fixing these during normal development.`,
+              action: 'Fix as you touch each file'
+            });
+          }
+
+          if (topFiles.length > 0 && topFiles[0][1] > 10) {
+            recommendations.push({
+              priority: 4,
+              title: 'Focus on Hot Spots',
+              description: `File "${topFiles[0][0]}" has ${topFiles[0][1]} violations. Fixing concentrated issues gives the best return.`,
+              action: 'Prioritize files with highest violation counts'
+            });
+          }
+
+          // Build the markdown report
+          let report = `# Hawky Onboarding Report
+
+> Generated on ${baseline.generated_at}
+> Branch: \`${baseline.branch}\`
+> Commit: \`${baseline.commit.slice(0, 8)}\`
+
+## Overview
+
+Hawky found **${violations.length} existing violations** in your codebase. These have been captured in your baseline, so they won't block PRs. Only *new* violations will block merges going forward.
+
+| Category | Count | Priority |
+|----------|-------|----------|
+| Security (Semgrep + Gitleaks) | ${severityMap.security.length} | :red_circle: High |
+| TypeScript | ${severityMap.typescript.length} | :orange_circle: Medium |
+| ESLint | ${severityMap.eslint.length} | :yellow_circle: Low |
+| **Total** | **${violations.length}** | |
+
+**Estimated effort to resolve all:** ${effortEstimate}
+
+---
+
+## Severity Breakdown
+
+### :red_circle: Security Issues (${severityMap.security.length})
+
+`;
+
+          if (severityMap.security.length === 0) {
+            report += `No security issues found. Great job keeping your codebase secure!\n\n`;
+          } else {
+            report += `These issues may indicate security vulnerabilities and should be prioritized.\n\n`;
+
+            // Group security by type
+            const semgrepIssues = severityMap.security.filter(v => v.gate === 'semgrep');
+            const gitleaksIssues = severityMap.security.filter(v => v.gate === 'gitleaks');
+
+            if (semgrepIssues.length > 0) {
+              report += `**Semgrep Findings (${semgrepIssues.length}):**\n`;
+              const semgrepByRule = {};
+              semgrepIssues.forEach(v => {
+                semgrepByRule[v.rule] = (semgrepByRule[v.rule] || 0) + 1;
+              });
+              Object.entries(semgrepByRule).slice(0, 5).forEach(([rule, count]) => {
+                report += `- \`${rule}\`: ${count} occurrence${count > 1 ? 's' : ''}\n`;
+              });
+              report += `\n`;
+            }
+
+            if (gitleaksIssues.length > 0) {
+              report += `**Potential Secrets (${gitleaksIssues.length}):**\n`;
+              report += `> :warning: Review these carefully. If any are real secrets, rotate them immediately.\n\n`;
+              gitleaksIssues.slice(0, 5).forEach(v => {
+                report += `- \`${v.file}\` (line ${v.line_hint}): ${v.rule}\n`;
+              });
+              if (gitleaksIssues.length > 5) {
+                report += `- ... and ${gitleaksIssues.length - 5} more\n`;
+              }
+              report += `\n`;
+            }
+          }
+
+          report += `### :orange_circle: TypeScript Errors (${severityMap.typescript.length})
+
+`;
+
+          if (severityMap.typescript.length === 0) {
+            report += `No TypeScript errors. Your type coverage is solid!\n\n`;
+          } else {
+            report += `Type errors indicate potential runtime bugs and should be fixed for code reliability.\n\n`;
+
+            // Group by error code
+            const tsByCode = {};
+            severityMap.typescript.forEach(v => {
+              const code = v.rule || 'unknown';
+              tsByCode[code] = (tsByCode[code] || 0) + 1;
+            });
+
+            report += `**By Error Code:**\n`;
+            Object.entries(tsByCode)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 5)
+              .forEach(([code, count]) => {
+                report += `- \`${code}\`: ${count} occurrence${count > 1 ? 's' : ''}\n`;
+              });
+            if (Object.keys(tsByCode).length > 5) {
+              report += `- ... and ${Object.keys(tsByCode).length - 5} more error types\n`;
+            }
+            report += `\n`;
+          }
+
+          report += `### :yellow_circle: ESLint Issues (${severityMap.eslint.length})
+
+`;
+
+          if (severityMap.eslint.length === 0) {
+            report += `No ESLint issues. Your code style is consistent!\n\n`;
+          } else {
+            report += `Linting issues affect code quality and maintainability.\n\n`;
+
+            // Group by rule
+            const eslintByRule = {};
+            severityMap.eslint.forEach(v => {
+              eslintByRule[v.rule] = (eslintByRule[v.rule] || 0) + 1;
+            });
+
+            report += `**Most Common Rules:**\n`;
+            Object.entries(eslintByRule)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 5)
+              .forEach(([rule, count]) => {
+                report += `- \`${rule}\`: ${count} occurrence${count > 1 ? 's' : ''}\n`;
+              });
+            if (Object.keys(eslintByRule).length > 5) {
+              report += `- ... and ${Object.keys(eslintByRule).length - 5} more rules\n`;
+            }
+            report += `\n`;
+          }
+
+          report += `---
+
+## Top Files with Most Violations
+
+`;
+
+          if (topFiles.length === 0) {
+            report += `No violations found!\n\n`;
+          } else {
+            report += `Focus on these files for maximum impact:\n\n`;
+            report += `| File | Violations |\n`;
+            report += `|------|------------|\n`;
+            topFiles.forEach(([file, count]) => {
+              report += `| \`${file}\` | ${count} |\n`;
+            });
+            report += `\n`;
+          }
+
+          report += `---
+
+## Recommendations
+
+`;
+
+          if (recommendations.length === 0) {
+            report += `Your codebase is in great shape! No immediate actions needed.\n\n`;
+          } else {
+            recommendations.sort((a, b) => a.priority - b.priority);
+            recommendations.forEach((rec, i) => {
+              report += `### ${i + 1}. ${rec.title}
+
+${rec.description}
+
+**Action:** ${rec.action}
+
+`;
+            });
+          }
+
+          report += `---
+
+## Next Steps
+
+1. **Review this report** — understand your current tech debt
+2. **Set up grace period** (optional) — give your team time to adapt
+3. **Merge PRs normally** — only *new* violations will block
+4. **Fix violations incrementally** — update baseline as you go
+
+### Updating the Baseline
+
+After fixing violations, regenerate the baseline to reflect your progress:
+
+1. Go to **Actions** > **Hawky Code Review** > **Run workflow**
+2. Select mode: \`baseline-update\`
+3. Run on your main branch
+
+---
+
+*This report was generated by [Hawky](https://github.com/your-org/hawky) — AI-powered code review for teams.*
+`;
+
+          fs.writeFileSync('.hawky/onboarding-report.md', report);
+          console.log('Onboarding report generated: .hawky/onboarding-report.md');
+
+          // Also output as JSON for programmatic access
+          const reportData = {
+            generated_at: baseline.generated_at,
+            branch: baseline.branch,
+            commit: baseline.commit,
+            total_violations: violations.length,
+            by_category: {
+              security: severityMap.security.length,
+              typescript: severityMap.typescript.length,
+              eslint: severityMap.eslint.length
+            },
+            top_files: topFiles.map(([file, count]) => ({ file, count })),
+            recommendations: recommendations,
+            effort_estimate: effortEstimate
+          };
+
+          fs.writeFileSync('.hawky/onboarding-report.json', JSON.stringify(reportData, null, 2));
+          console.log('Onboarding data generated: .hawky/onboarding-report.json');
+          REPORT_SCRIPT
+
+          echo "report_generated=true" >> $GITHUB_OUTPUT
+
+          # Add report to step summary
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Onboarding Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo ":clipboard: Generated \`.hawky/onboarding-report.md\` with:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Extract summary from JSON for step summary
+          if [ -f ".hawky/onboarding-report.json" ]; then
+            node -e "
+              const data = JSON.parse(require('fs').readFileSync('.hawky/onboarding-report.json', 'utf8'));
+              console.log('- **Total violations:** ' + data.total_violations);
+              console.log('- **Security issues:** ' + data.by_category.security);
+              console.log('- **TypeScript errors:** ' + data.by_category.typescript);
+              console.log('- **ESLint issues:** ' + data.by_category.eslint);
+              console.log('- **Estimated effort:** ' + data.effort_estimate);
+              if (data.recommendations.length > 0) {
+                console.log('');
+                console.log('**Top recommendation:** ' + data.recommendations[0].title);
+              }
+            " >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Commit Baseline
         if: steps.baseline.outputs.baseline_valid == 'true'
         env:
@@ -424,22 +756,49 @@ VIOLATION_EOF
           git config user.name "Hawky Bot"
           git config user.email "hawky-bot@users.noreply.github.com"
 
-          # Check if baseline changed
-          if git diff --quiet .hawky/baseline.json 2>/dev/null; then
-            echo "No changes to baseline"
+          # Check if baseline or report changed
+          BASELINE_CHANGED="false"
+          REPORT_CHANGED="false"
+
+          if ! git diff --quiet .hawky/baseline.json 2>/dev/null; then
+            BASELINE_CHANGED="true"
+          fi
+
+          # S083: Check for onboarding report changes
+          if [ -f ".hawky/onboarding-report.md" ]; then
+            if ! git diff --quiet .hawky/onboarding-report.md 2>/dev/null || ! git ls-files --error-unmatch .hawky/onboarding-report.md 2>/dev/null; then
+              REPORT_CHANGED="true"
+            fi
+          fi
+
+          if [ "$BASELINE_CHANGED" = "false" ] && [ "$REPORT_CHANGED" = "false" ]; then
+            echo "No changes to baseline or report"
             echo "## Baseline Unchanged" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "The baseline file has not changed since the last generation." >> $GITHUB_STEP_SUMMARY
           else
-            # Stage and commit
+            # Stage baseline and report files
             git add .hawky/baseline.json
 
-            COMMIT_MSG="chore(hawky): update baseline
+            # S083: Also stage onboarding report if generated
+            if [ -f ".hawky/onboarding-report.md" ]; then
+              git add .hawky/onboarding-report.md
+            fi
+            if [ -f ".hawky/onboarding-report.json" ]; then
+              git add .hawky/onboarding-report.json
+            fi
+
+            COMMIT_MSG="chore(hawky): update baseline and onboarding report
 
 Generated by Hawky baseline scan.
 Branch: ${{ inputs.baseline_branch || 'main' }}
 Violations: ${{ steps.baseline.outputs.violations_count }}
-Mode: ${{ inputs.mode }}"
+Mode: ${{ inputs.mode }}
+
+Includes:
+- .hawky/baseline.json - violation hashes for baseline comparison
+- .hawky/onboarding-report.md - human-readable tech debt summary
+- .hawky/onboarding-report.json - machine-readable report data"
 
             git commit -m "$COMMIT_MSG"
 
@@ -449,7 +808,7 @@ Mode: ${{ inputs.mode }}"
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "---" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo ":rocket: **Baseline committed and pushed to \`${{ inputs.baseline_branch || 'main' }}\`**" >> $GITHUB_STEP_SUMMARY
+            echo ":rocket: **Baseline and onboarding report committed and pushed to \`${{ inputs.baseline_branch || 'main' }}\`**" >> $GITHUB_STEP_SUMMARY
           fi
 
   # Main review job - runs on pull_request or workflow_dispatch with review mode

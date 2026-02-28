@@ -110,6 +110,31 @@ gates:
 #   Run workflow with mode: "baseline-update"
 
 # ==============================================================================
+# Onboarding Report (S083)
+# ==============================================================================
+# When you generate a baseline, Hawky also creates an onboarding report
+# that gives your team visibility into the existing tech debt.
+#
+# Files generated:
+#   .hawky/baseline.json        - violation hashes for baseline comparison
+#   .hawky/onboarding-report.md - human-readable tech debt summary
+#   .hawky/onboarding-report.json - machine-readable report data
+#
+# The onboarding report includes:
+# - Total violations broken down by category (Security, TypeScript, ESLint)
+# - Severity distribution with priority indicators
+# - Top 10 files with most violations (hot spots)
+# - Estimated effort to resolve all issues
+# - Actionable recommendations prioritized by impact
+# - Next steps for your team
+#
+# Example: View your tech debt dashboard after baseline generation
+#   cat .hawky/onboarding-report.md
+#
+# Example: Parse report data programmatically
+#   node -e "console.log(JSON.parse(require('fs').readFileSync('.hawky/onboarding-report.json')))"
+
+# ==============================================================================
 # Combining Baseline + Grace Period
 # ==============================================================================
 # These features work together:
@@ -118,6 +143,8 @@ gates:
 #
 # Recommended adoption flow:
 # 1. Generate baseline (captures existing tech debt)
+#    → Review onboarding report to understand your tech debt
 # 2. Enable grace period (gives team time to learn Hawky)
 # 3. After grace period ends, only NEW violations block
 # 4. Gradually fix baseline violations over time
+#    → Re-run baseline to update report and track progress
