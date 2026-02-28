@@ -81,7 +81,86 @@ jobs:
           echo "head_ref=${{ github.head_ref }}" >> $GITHUB_OUTPUT
           echo "base_ref=${{ github.base_ref }}" >> $GITHUB_OUTPUT
 
-      # Scaffold placeholder - future gates will replace this
+      # Install dependencies (if not cached)
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: |
+          if [ -f yarn.lock ]; then
+            yarn install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          fi
+
+      # S002: TypeScript Strict Gate
+      - name: TypeScript Strict Gate
+        id: typecheck
+        run: |
+          echo "## TypeScript Strict Gate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check if TypeScript is available
+          if ! [ -f tsconfig.json ]; then
+            echo "No tsconfig.json found — skipping TypeScript check"
+            echo ":white_check_mark: **Skipped** — No tsconfig.json found" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Check if tsc is available
+          if ! npx tsc --version > /dev/null 2>&1; then
+            echo "TypeScript not installed — skipping TypeScript check"
+            echo ":white_check_mark: **Skipped** — TypeScript not installed" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "Running tsc --noEmit..."
+          TSC_VERSION=$(npx tsc --version)
+          echo "TypeScript version: $TSC_VERSION"
+
+          # Run tsc and capture output
+          set +e
+          TSC_OUTPUT=$(npx tsc --noEmit 2>&1)
+          TSC_EXIT_CODE=$?
+          set -e
+
+          # Count errors
+          ERROR_COUNT=$(echo "$TSC_OUTPUT" | grep -c "error TS" || echo "0")
+
+          if [ "$TSC_EXIT_CODE" -eq 0 ]; then
+            echo ":white_check_mark: **Passed** — No type errors" >> $GITHUB_STEP_SUMMARY
+            echo "TypeScript check passed — no errors"
+            exit 0
+          fi
+
+          # Parse errors and create annotations
+          echo ":x: **Failed** — $ERROR_COUNT type error(s) found" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Errors" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "$TSC_OUTPUT" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+          # Parse each error line and emit GitHub annotation
+          # Format: path/to/file.ts(line,col): error TS1234: message
+          echo "$TSC_OUTPUT" | while IFS= read -r line; do
+            # Match TypeScript error format: file(line,col): error TSxxxx: message
+            if [[ "$line" =~ ^([^(]+)\(([0-9]+),([0-9]+)\):\ error\ (TS[0-9]+):\ (.*)$ ]]; then
+              FILE="${BASH_REMATCH[1]}"
+              LINE="${BASH_REMATCH[2]}"
+              COL="${BASH_REMATCH[3]}"
+              CODE="${BASH_REMATCH[4]}"
+              MSG="${BASH_REMATCH[5]}"
+              echo "::error file=$FILE,line=$LINE,col=$COL,title=TypeScript $CODE::$MSG"
+            fi
+          done
+
+          echo ""
+          echo "TypeScript check failed with $ERROR_COUNT error(s)"
+          exit 1
+
+      # Scaffold placeholder - future gates will build on this
       - name: Hawky Scaffold Ready
         run: |
           echo "Hawky scaffold initialized successfully"
