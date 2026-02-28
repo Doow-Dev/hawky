@@ -1,0 +1,77 @@
+rules:
+  - id: hawky.security.sql-injection-template-literal
+    message: |
+      SQL query uses template literal with variable interpolation. This is vulnerable to SQL injection.
+      Use parameterized queries instead: db.query('SELECT * FROM users WHERE id = $1', [userId])
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 - Injection"
+      hawky-rule: true
+    pattern-either:
+      # db.execute with template literal
+      - pattern: $DB.execute(`... $SQL ...${$VAR}...`)
+      - pattern: $DB.query(`... $SQL ...${$VAR}...`)
+      - pattern: $DB.raw(`... $SQL ...${$VAR}...`)
+      - pattern: $DB.run(`... $SQL ...${$VAR}...`)
+      # Direct SQL execution patterns
+      - pattern: $DB.$METHOD(`SELECT ... ${$VAR} ...`)
+      - pattern: $DB.$METHOD(`INSERT ... ${$VAR} ...`)
+      - pattern: $DB.$METHOD(`UPDATE ... ${$VAR} ...`)
+      - pattern: $DB.$METHOD(`DELETE ... ${$VAR} ...`)
+      - pattern: $DB.$METHOD(`DROP ... ${$VAR} ...`)
+      # Prisma raw queries
+      - pattern: $PRISMA.$executeRaw(`... ${$VAR} ...`)
+      - pattern: $PRISMA.$queryRaw(`... ${$VAR} ...`)
+
+  - id: hawky.security.sql-injection-concatenation
+    message: |
+      SQL query uses string concatenation with variables. This is vulnerable to SQL injection.
+      Use parameterized queries instead: db.query('SELECT * FROM users WHERE id = $1', [userId])
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 - Injection"
+      hawky-rule: true
+    pattern-either:
+      # String concatenation with SQL keywords
+      - pattern: |
+          "SELECT " + ... + $VAR + ...
+      - pattern: |
+          "INSERT " + ... + $VAR + ...
+      - pattern: |
+          "UPDATE " + ... + $VAR + ...
+      - pattern: |
+          "DELETE " + ... + $VAR + ...
+      - pattern: |
+          'SELECT ' + ... + $VAR + ...
+      - pattern: |
+          'INSERT ' + ... + $VAR + ...
+      - pattern: |
+          'UPDATE ' + ... + $VAR + ...
+      - pattern: |
+          'DELETE ' + ... + $VAR + ...
+
+  - id: hawky.security.sql-injection-knex-raw
+    message: |
+      Knex raw() method with template literal is vulnerable to SQL injection.
+      Use Knex parameterized binding: knex.raw('SELECT * FROM users WHERE id = ?', [userId])
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 - Injection"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: $KNEX.raw(`...${$VAR}...`)
+          - pattern: knex.raw(`...${$VAR}...`)
+      - pattern-not: $KNEX.raw(`...`, [...])
