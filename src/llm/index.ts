@@ -50,3 +50,16 @@ export {
   formatFileContentsForLLM,
   formatContextAsPrompt,
 } from './context';
+
+export {
+  // Types
+  type ReviewSeverity,
+  type ReviewIssue,
+  type LLMReviewResult,
+  type ReviewOptions,
+  // Functions
+  parseReviewResponse,
+  runReview,
+  formatReviewAsMarkdown,
+  reviewIssuesToViolations,
+} from './review';
