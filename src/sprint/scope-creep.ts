@@ -112,7 +112,7 @@ export function parseScopeFromSprintMd(
     'im'
   );
   const fiveColMatch = fiveColPattern.exec(sprintMdContent);
-  if (fiveColMatch) {
+  if (fiveColMatch && fiveColMatch[1]) {
     return parseScopeString(fiveColMatch[1]);
   }
 
@@ -122,7 +122,7 @@ export function parseScopeFromSprintMd(
     'i'
   );
   const annotationMatch = scopeAnnotationPattern.exec(sprintMdContent);
-  if (annotationMatch) {
+  if (annotationMatch && annotationMatch[1]) {
     return parseScopeString(annotationMatch[1]);
   }
 
@@ -165,7 +165,9 @@ export function fileMatchesScope(filePath: string, scopePattern: string): boolea
 
   // Glob with directory: src/*.ts
   if (pattern.includes('*')) {
-    const [dir, glob] = pattern.split('*');
+    const parts = pattern.split('*');
+    const dir = parts[0] ?? '';
+    const glob = parts[1] ?? '';
     return filePath.startsWith(dir) && filePath.endsWith(glob);
   }
 
@@ -199,7 +201,7 @@ export function detectScopeCreep(options: ScopeCreepOptions): ScopeCreepResult {
 
   // Extract story ID from branch
   const storyIdMatch = /(?:^|[-_/])([Ss]\d{3,4})(?:[-_/]|$)/.exec(branchName);
-  const storyId = storyIdMatch ? storyIdMatch[1].toUpperCase() : null;
+  const storyId = storyIdMatch ? storyIdMatch[1]?.toUpperCase() ?? null : null;
 
   if (!storyId) {
     return {

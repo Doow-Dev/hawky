@@ -112,7 +112,7 @@ export function tallyAuthors(
  */
 export function getPrimaryAuthor(authors: CommitAuthor[]): string | null {
   if (authors.length === 0) return null;
-  return authors[0].login;
+  return authors[0]?.login ?? null;
 }
 
 /**

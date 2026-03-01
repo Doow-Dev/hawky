@@ -208,6 +208,10 @@ export async function checkSpecStaleness(
   }
 
   const latestSpecCommit = commits[0];
+  if (!latestSpecCommit) {
+    return null;
+  }
+
   const specLastModifiedDate = latestSpecCommit.commit.committer?.date ?? branchCutDate;
 
   return {
@@ -215,7 +219,7 @@ export async function checkSpecStaleness(
     branchCutDate,
     specLastModifiedDate,
     specCommitSha: latestSpecCommit.sha.slice(0, 8),
-    specCommitMessage: latestSpecCommit.commit.message.split('\n')[0], // first line only
+    specCommitMessage: latestSpecCommit.commit.message.split('\n')[0] ?? '', // first line only
   };
 }
 

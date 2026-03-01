@@ -119,7 +119,7 @@ export interface DependencyOctokitLike {
  */
 export function extractCurrentStoryId(branchName: string): string | null {
   const match = /(?:^|[-_/])([Ss]\d{3,4})(?:[-_/]|$)/.exec(branchName);
-  return match ? match[1].toUpperCase() : null;
+  return match ? match[1]?.toUpperCase() ?? null : null;
 }
 
 /**
@@ -146,7 +146,7 @@ export function parseDependencies(sprintMdContent: string, storyId: string): str
     'i'
   );
   const sectionMatch = sectionPattern.exec(sprintMdContent);
-  const storySection = sectionMatch ? sectionMatch[1] : '';
+  const storySection = sectionMatch?.[1] ?? '';
 
   // Parse dependency patterns within the story section
   if (storySection) {
@@ -154,14 +154,14 @@ export function parseDependencies(sprintMdContent: string, storyId: string): str
     const dependsOnPattern = /(?:depends?(?:\s+on|_on)?|requires?|dependencies):?\s+([Ss]\d{3,4}(?:\s*,\s*[Ss]\d{3,4})*)/gi;
     let m: RegExpExecArray | null;
     while ((m = dependsOnPattern.exec(storySection)) !== null) {
-      const depIds = m[1].match(/[Ss]\d{3,4}/g) ?? [];
+      const depIds = m[1]?.match(/[Ss]\d{3,4}/g) ?? [];
       depIds.forEach((d) => deps.add(d.toUpperCase()));
     }
 
     // Pattern 2: "Blockers: S123" / "Deps: S123"
     const blockersPattern = /(?:blockers?|deps?):?\s+([Ss]\d{3,4}(?:\s*,\s*[Ss]\d{3,4})*)/gi;
     while ((m = blockersPattern.exec(storySection)) !== null) {
-      const depIds = m[1].match(/[Ss]\d{3,4}/g) ?? [];
+      const depIds = m[1]?.match(/[Ss]\d{3,4}/g) ?? [];
       depIds.forEach((d) => deps.add(d.toUpperCase()));
     }
   }
@@ -174,7 +174,7 @@ export function parseDependencies(sprintMdContent: string, storyId: string): str
   );
   const tableMatch = tablePattern.exec(sprintMdContent);
   if (tableMatch) {
-    const depIds = tableMatch[1].match(/[Ss]\d{3,4}/g) ?? [];
+    const depIds = tableMatch[1]?.match(/[Ss]\d{3,4}/g) ?? [];
     depIds.forEach((d) => deps.add(d.toUpperCase()));
   }
 

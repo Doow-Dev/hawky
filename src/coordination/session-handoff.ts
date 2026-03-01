@@ -136,20 +136,17 @@ export function anyFileMatches(files: string[], patterns: RegExp[]): string[] {
 export function generateHandoffNotifications(options: HandoffOptions): HandoffResult {
   const {
     prNumber,
-    prTitle,
     prUrl,
     authorLogin,
     headBranch,
     changedFiles,
-    labels,
     date,
-    projectName = 'hawky',
     sessionId = 'hawky-auto',
   } = options;
 
   const dateStr = date.split('T')[0];
   const storyMatch = /(?:^|[-_/])([Ss]\d{3,4})(?:[-_/]|$)/.exec(headBranch);
-  const storyRef = storyMatch ? ` (${storyMatch[1].toUpperCase()})` : '';
+  const storyRef = storyMatch ? ` (${storyMatch[1]?.toUpperCase()})` : '';
 
   const notifications: HandoffNotification[] = [];
 

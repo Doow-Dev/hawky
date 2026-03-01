@@ -131,7 +131,7 @@ const BLOCKED_STATUS_ALIASES = ['blocked', 'on-hold', 'hold', 'waiting'];
  */
 export function extractStoryIdFromBranch(branchName: string): string | null {
   const match = BRANCH_STORY_ID_PATTERN.exec(branchName);
-  if (!match) return null;
+  if (!match || !match[1]) return null;
   // Normalize to uppercase S prefix
   return match[1].toUpperCase();
 }
@@ -164,10 +164,10 @@ export function parseSprintMd(content: string): SprintStory[] {
 
   let match: RegExpExecArray | null;
   while ((match = rowPattern.exec(content)) !== null) {
-    const id = match[1].trim().toUpperCase();
-    const description = match[2].trim();
-    const owner = match[3].trim();
-    const statusRaw = match[4].trim();
+    const id = (match[1] ?? '').trim().toUpperCase();
+    const description = (match[2] ?? '').trim();
+    const owner = (match[3] ?? '').trim();
+    const statusRaw = (match[4] ?? '').trim();
 
     // Skip the header row if it somehow matched
     if (id === 'STORY' || description.toLowerCase() === 'description') continue;

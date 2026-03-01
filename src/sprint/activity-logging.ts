@@ -115,7 +115,7 @@ export interface ActivityLoggingResult {
  * Format a date string as YYYY-MM-DD
  */
 export function formatDate(isoDate: string): string {
-  return isoDate.split('T')[0];
+  return isoDate.split('T')[0] ?? '';
 }
 
 /**
@@ -144,7 +144,7 @@ export function normalizeAuthorToAgent(login: string): string {
  */
 export function extractStoryIdForActivity(branchName: string): string | null {
   const match = /(?:^|[-_/])([Ss]\d{3,4})(?:[-_/]|$)/.exec(branchName);
-  return match ? match[1].toUpperCase() : null;
+  return match ? match[1]?.toUpperCase() ?? null : null;
 }
 
 /**

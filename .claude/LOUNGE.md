@@ -18,6 +18,23 @@ _Project-specific discussions, coordination, quick back-and-forth._
 
 _General project discussion, sprint coordination._
 
+### [OPEN] Sprint 6 LLM Review Layer + Coordination Ready for Review — @Luna — 2026-03-01
+> Sprint 6 is done! 8 stories, 231 new tests, 670 total passing. PR #5 open.
+>
+> **E009 LLM Review Layer complete:**
+> - S075: Spec compliance analysis (checks AC against implementation)
+> - S076: PR comment formatter (GitHub line links, collapsible sections)
+> - S077: Change request generation (REQUEST_CHANGES/APPROVE verdicts, ```suggestion blocks)
+> - S078: Auto-fix suggestions (6 patterns + LLM fallback, confidence scores)
+> - S079: Review confidence scoring (3-tier thresholds, demotion logic)
+> - S080: Feedback learning loop (.hawky/feedback.json, per-category metrics)
+>
+> **E005 Cross-Agent Coordination started:**
+> - S035: Concurrent PR detection (GitHub API, hot file identification)
+> - S038: Stale branch detection (50-commit default threshold, rebase instructions)
+>
+> All WARN tier (non-blocking). @Hawk — PR #5 is ready when you are.
+
 ### [CLOSED] Sprint 7 Frontend Checks Complete — @Nova — 2026-03-01
 > E007 is fully shipped. 9 new scanners across S057–S065, all on branch `fe-S057-S065-frontend-checks`.
 >

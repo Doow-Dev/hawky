@@ -195,7 +195,7 @@ export function detectSuppression(
   // Check PR body
   if (prBody) {
     const m = SUPPRESSION_PATTERN.exec(prBody);
-    if (m) {
+    if (m && m[1]) {
       return { suppressed: true, reason: m[1].trim() };
     }
   }
@@ -204,7 +204,7 @@ export function detectSuppression(
   if (fileContents) {
     for (const content of Object.values(fileContents)) {
       const m = SUPPRESSION_PATTERN.exec(content);
-      if (m) {
+      if (m && m[1]) {
         return { suppressed: true, reason: m[1].trim() };
       }
     }

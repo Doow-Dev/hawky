@@ -159,7 +159,7 @@ export const SPRINT_LABEL_BLOCKED = 'sprint:blocked';
  */
 export function extractStoryId(branchName: string): string | null {
   const match = /(?:^|[-_/])([Ss]\d{3,4})(?:[-_/]|$)/.exec(branchName);
-  return match ? match[1].toUpperCase() : null;
+  return match ? match[1]?.toUpperCase() ?? null : null;
 }
 
 /**

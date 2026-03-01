@@ -185,6 +185,7 @@ export function findHawkApproval(
   // Look through events in reverse to find the most recent
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
+    if (!event) continue;
     if (!hawkLoginSet.has(event.login.toLowerCase())) continue;
 
     // Direct approval
@@ -212,6 +213,7 @@ export function findPMConfirmation(
 
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
+    if (!event) continue;
     if (!pmLoginSet.has(event.login.toLowerCase())) continue;
 
     // Direct approval counts as confirmation
