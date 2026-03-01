@@ -7,8 +7,8 @@
 
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import type { ReportData, ReportConfig, GateSummary } from './types';
-import { DEFAULT_REPORT_CONFIG } from './types';
+import type { ReportData, ReportConfig, GateSummary, SuppressionEntry } from './types';
+import { DEFAULT_REPORT_CONFIG, GATE_DISPLAY_NAMES } from './types';
 
 /**
  * Marker text to identify Hawky comments
@@ -264,6 +264,76 @@ function generateGracePeriodSection(data: ReportData): string {
 }
 
 /**
+ * Generate the suppressions section
+ * S085: Suppression Review Dashboard
+ */
+function generateSuppressionsSection(suppressions: SuppressionEntry[]): string {
+  if (suppressions.length === 0) {
+    return '';
+  }
+
+  const lines: string[] = [];
+
+  // Determine if we should show a warning for high suppression count
+  const isHighCount = suppressions.length > 5;
+  const suppressionsWithoutReason = suppressions.filter((s) => !s.hasReason);
+
+  // Section header with count
+  const icon = isHighCount ? ':warning:' : ':see_no_evil:';
+  const countText = `This PR adds ${suppressions.length} new suppression(s)`;
+  const warningText = isHighCount ? ' — review justifications' : '';
+
+  lines.push('<details>');
+  lines.push(`<summary>${icon} Suppressions — ${countText}${warningText}</summary>`);
+  lines.push('');
+
+  // High count warning
+  if (isHighCount) {
+    lines.push(':warning: **High suppression count** — Consider addressing these violations instead of suppressing them.');
+    lines.push('');
+  }
+
+  // Table of suppressions
+  lines.push('| File | Line | Rule | Reason |');
+  lines.push('|------|------|------|--------|');
+
+  for (const suppression of suppressions) {
+    const fileDisplay = suppression.file.length > 40
+      ? `...${suppression.file.slice(-37)}`
+      : suppression.file;
+
+    // Format the reason - flag if missing
+    let reasonDisplay: string;
+    if (suppression.hasReason && suppression.reason) {
+      reasonDisplay = suppression.reason;
+    } else if (suppression.reason) {
+      // Has pattern but no justification comment
+      reasonDisplay = `:warning: \`${suppression.reason}\` _(no justification)_`;
+    } else {
+      reasonDisplay = ':warning: _No reason provided_';
+    }
+
+    const gateDisplayName = GATE_DISPLAY_NAMES[suppression.gate] || suppression.gate;
+    const ruleDisplay = `${gateDisplayName}: ${suppression.rule.split(':').slice(1).join(':')}`;
+
+    lines.push(`| \`${fileDisplay}\` | ${suppression.line} | ${ruleDisplay} | ${reasonDisplay} |`);
+  }
+
+  lines.push('');
+
+  // Note about suppressions without reasons
+  if (suppressionsWithoutReason.length > 0) {
+    lines.push(`_${suppressionsWithoutReason.length} suppression(s) lack proper justification. Consider adding comments to .hawkyignore explaining why each suppression is needed._`);
+    lines.push('');
+  }
+
+  lines.push('</details>');
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+/**
  * Generate the full PR comment markdown
  */
 export function generatePRComment(
@@ -318,6 +388,9 @@ export function generatePRComment(
     if (data.overallStatus === 'fail') {
       lines.push(generateFailureDetails(data));
     }
+
+    // S085: Suppressions section
+    lines.push(generateSuppressionsSection(data.suppressions));
 
     // Fail-fast skipped gates
     lines.push(generateFailFastSection(data.failFastSkippedGates));

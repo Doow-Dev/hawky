@@ -6,8 +6,8 @@
  */
 
 import * as core from '@actions/core';
-import type { ReportData, GateSummary, ReportConfig } from './types';
-import { DEFAULT_REPORT_CONFIG } from './types';
+import type { ReportData, GateSummary, ReportConfig, SuppressionEntry } from './types';
+import { DEFAULT_REPORT_CONFIG, GATE_DISPLAY_NAMES } from './types';
 
 /**
  * Status icon for gate status (emoji version for step summary)
@@ -117,6 +117,58 @@ function buildGateTableRows(
 }
 
 /**
+ * Build suppression details markdown for step summary
+ * S085: Suppression Review Dashboard
+ */
+function buildSuppressionDetails(suppressions: SuppressionEntry[]): string {
+  if (suppressions.length === 0) {
+    return '';
+  }
+
+  const lines: string[] = [];
+  const isHighCount = suppressions.length > 5;
+  const suppressionsWithoutReason = suppressions.filter((s) => !s.hasReason);
+
+  // Warning for high count
+  if (isHighCount) {
+    lines.push('\u26A0\uFE0F **High suppression count** \u2014 Consider addressing these violations instead of suppressing them.');
+    lines.push('');
+  }
+
+  // Table of suppressions
+  lines.push('| File | Line | Rule | Reason |');
+  lines.push('|------|------|------|--------|');
+
+  for (const suppression of suppressions) {
+    const fileDisplay = suppression.file.length > 40
+      ? `...${suppression.file.slice(-37)}`
+      : suppression.file;
+
+    let reasonDisplay: string;
+    if (suppression.hasReason && suppression.reason) {
+      reasonDisplay = suppression.reason;
+    } else if (suppression.reason) {
+      reasonDisplay = `\u26A0\uFE0F \`${suppression.reason}\` _(no justification)_`;
+    } else {
+      reasonDisplay = '\u26A0\uFE0F _No reason provided_';
+    }
+
+    const gateDisplayName = GATE_DISPLAY_NAMES[suppression.gate] || suppression.gate;
+    const ruleDisplay = `${gateDisplayName}: ${suppression.rule.split(':').slice(1).join(':')}`;
+
+    lines.push(`| \`${fileDisplay}\` | ${suppression.line} | ${ruleDisplay} | ${reasonDisplay} |`);
+  }
+
+  // Note about missing justifications
+  if (suppressionsWithoutReason.length > 0) {
+    lines.push('');
+    lines.push(`_${suppressionsWithoutReason.length} suppression(s) lack proper justification._`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Generate and write the step summary using @actions/core.summary API
  */
 export async function writeStepSummary(
@@ -185,6 +237,19 @@ export async function writeStepSummary(
       }).join('\n');
 
       core.summary.addDetails('\u{1F50D} Failed Gates Details', failureDetails);
+    }
+
+    // S085: Suppressions section
+    if (data.suppressions.length > 0 && config.includeDetails) {
+      const isHighCount = data.suppressions.length > 5;
+      const icon = isHighCount ? '\u26A0\uFE0F' : '\u{1F648}';
+      const countText = `This PR adds ${data.suppressions.length} new suppression(s)`;
+      const warningText = isHighCount ? ' \u2014 review justifications' : '';
+
+      core.summary.addDetails(
+        `${icon} Suppressions \u2014 ${countText}${warningText}`,
+        buildSuppressionDetails(data.suppressions)
+      );
     }
 
     // Fail-fast skipped gates
@@ -310,6 +375,22 @@ export function generateStepSummaryMarkdown(
             : `${gate.newViolations} error(s)`;
       lines.push(`- **${gate.displayName}**: ${msg}`);
     }
+    lines.push('');
+    lines.push('</details>');
+    lines.push('');
+  }
+
+  // S085: Suppressions section
+  if (data.suppressions.length > 0 && config.includeDetails) {
+    const isHighCount = data.suppressions.length > 5;
+    const icon = isHighCount ? '\u26A0\uFE0F' : '\u{1F648}';
+    const countText = `This PR adds ${data.suppressions.length} new suppression(s)`;
+    const warningText = isHighCount ? ' \u2014 review justifications' : '';
+
+    lines.push('<details>');
+    lines.push(`<summary>${icon} Suppressions \u2014 ${countText}${warningText}</summary>`);
+    lines.push('');
+    lines.push(buildSuppressionDetails(data.suppressions));
     lines.push('');
     lines.push('</details>');
     lines.push('');
