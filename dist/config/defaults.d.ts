@@ -30,6 +30,14 @@ export declare const SEMGREP_GATE_DEFAULTS: GateConfig;
  */
 export declare const GITLEAKS_GATE_DEFAULTS: GateConfig;
 /**
+ * Default configuration for the npm Audit gate
+ */
+export declare const NPM_AUDIT_GATE_DEFAULTS: GateConfig;
+/**
+ * Default configuration for the Design System gate
+ */
+export declare const DESIGN_SYSTEM_GATE_DEFAULTS: GateConfig;
+/**
  * Map of gate names to their default configurations
  */
 export declare const GATE_DEFAULTS: Record<GateName, GateConfig>;

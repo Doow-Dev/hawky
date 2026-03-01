@@ -8,4 +8,6 @@ export { typescriptGate, parseTypeScriptOutput, violationToAnnotation, } from '.
 export { eslintGate, parseESLintOutput, parseESLintOutputWithSeverity, getChangedFiles, violationToAnnotation as eslintViolationToAnnotation, } from './eslint';
 export { semgrepGate, parseSemgrepOutput, parseSemgrepOutputWithSeverity, getChangedFiles as semgrepGetChangedFiles, violationToAnnotation as semgrepViolationToAnnotation, } from './semgrep';
 export { gitleaksGate, parseGitleaksOutput, getChangedFiles as gitleaksGetChangedFiles, violationToAnnotation as gitleaksViolationToAnnotation, } from './gitleaks';
+export { npmAuditGate, parseNpmAuditOutput, violationToAnnotation as npmAuditViolationToAnnotation, } from './npm-audit';
+export { designSystemGate, scanForBannedClasses, scanForHardcodedColors, scanForSpacingViolations, scanForFontSizeViolations, violationToAnnotation as designSystemViolationToAnnotation, } from './design-system';
 //# sourceMappingURL=index.d.ts.map

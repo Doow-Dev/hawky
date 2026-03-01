@@ -30873,7 +30873,7 @@ function createMatcher(baseline) {
  * Matches Sprint 1 behavior from hawky.yml env section.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.DEFAULT_CONFIG = exports.GRACE_PERIOD_DEFAULTS = exports.GATE_DEFAULTS = exports.GITLEAKS_GATE_DEFAULTS = exports.SEMGREP_GATE_DEFAULTS = exports.ESLINT_GATE_DEFAULTS = exports.TEST_GATE_DEFAULTS = exports.BUILD_GATE_DEFAULTS = exports.TYPESCRIPT_GATE_DEFAULTS = void 0;
+exports.DEFAULT_CONFIG = exports.GRACE_PERIOD_DEFAULTS = exports.GATE_DEFAULTS = exports.DESIGN_SYSTEM_GATE_DEFAULTS = exports.NPM_AUDIT_GATE_DEFAULTS = exports.GITLEAKS_GATE_DEFAULTS = exports.SEMGREP_GATE_DEFAULTS = exports.ESLINT_GATE_DEFAULTS = exports.TEST_GATE_DEFAULTS = exports.BUILD_GATE_DEFAULTS = exports.TYPESCRIPT_GATE_DEFAULTS = void 0;
 exports.createDefaultConfig = createDefaultConfig;
 /**
  * Default configuration for the TypeScript gate
@@ -30927,6 +30927,26 @@ exports.GITLEAKS_GATE_DEFAULTS = {
     timeout: 300, // 5 minutes
 };
 /**
+ * Default configuration for the npm Audit gate
+ */
+exports.NPM_AUDIT_GATE_DEFAULTS = {
+    enabled: true,
+    blocking: true,
+    timeout: 120, // 2 minutes
+};
+/**
+ * Default configuration for the Design System gate
+ */
+exports.DESIGN_SYSTEM_GATE_DEFAULTS = {
+    enabled: false, // Opt-in by default — not all projects use design systems
+    blocking: true,
+    timeout: 120, // 2 minutes — static analysis is fast
+    bannedClasses: [],
+    spacingScale: [0, 1, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 288, 320, 384],
+    fontSizeScale: [10, 12, 14, 16, 18, 20, 24, 30, 36, 48, 60, 72, 96, 128],
+    allowHardcodedColors: false,
+};
+/**
  * Map of gate names to their default configurations
  */
 exports.GATE_DEFAULTS = {
@@ -30936,6 +30956,8 @@ exports.GATE_DEFAULTS = {
     eslint: exports.ESLINT_GATE_DEFAULTS,
     semgrep: exports.SEMGREP_GATE_DEFAULTS,
     gitleaks: exports.GITLEAKS_GATE_DEFAULTS,
+    'npm-audit': exports.NPM_AUDIT_GATE_DEFAULTS,
+    'design-system': exports.DESIGN_SYSTEM_GATE_DEFAULTS,
 };
 /**
  * Default grace period configuration
@@ -30966,6 +30988,8 @@ function createDefaultConfig() {
             eslint: { ...exports.ESLINT_GATE_DEFAULTS },
             semgrep: { ...exports.SEMGREP_GATE_DEFAULTS },
             gitleaks: { ...exports.GITLEAKS_GATE_DEFAULTS },
+            'npm-audit': { ...exports.NPM_AUDIT_GATE_DEFAULTS },
+            'design-system': { ...exports.DESIGN_SYSTEM_GATE_DEFAULTS },
         },
         gracePeriod: { ...exports.GRACE_PERIOD_DEFAULTS },
     };
@@ -31357,7 +31381,514 @@ exports.GATE_NAMES = [
     'eslint',
     'semgrep',
     'gitleaks',
+    'npm-audit',
+    'design-system',
 ];
+
+
+/***/ }),
+
+/***/ 6088:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Design System Gate
+ *
+ * Enforces design system compliance by detecting:
+ * 1. Banned Tailwind classes (S026)
+ * 2. Hardcoded colors (S027)
+ * 3. Non-scale spacing values (S028)
+ * 4. Arbitrary font sizes (S029)
+ *
+ * Scans CSS, SCSS, TSX, JSX files for violations.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.designSystemGate = void 0;
+exports.scanForBannedClasses = scanForBannedClasses;
+exports.scanForHardcodedColors = scanForHardcodedColors;
+exports.scanForSpacingViolations = scanForSpacingViolations;
+exports.scanForFontSizeViolations = scanForFontSizeViolations;
+exports.violationToAnnotation = violationToAnnotation;
+const core = __importStar(__nccwpck_require__(7484));
+const exec = __importStar(__nccwpck_require__(5236));
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+/**
+ * File extensions to scan for design system violations
+ */
+const SCANNABLE_EXTENSIONS = ['.css', '.scss', '.tsx', '.jsx', '.ts', '.js'];
+/**
+ * Default banned class patterns (common anti-patterns)
+ */
+const DEFAULT_BANNED_PATTERNS = [
+    // Arbitrary color classes — should use design tokens
+    'bg-\\[#[0-9a-fA-F]{3,8}\\]',
+    'text-\\[#[0-9a-fA-F]{3,8}\\]',
+    'border-\\[#[0-9a-fA-F]{3,8}\\]',
+    // Arbitrary spacing — should use scale
+    'p-\\[\\d+px\\]',
+    'm-\\[\\d+px\\]',
+    'gap-\\[\\d+px\\]',
+    // Arbitrary sizing
+    'w-\\[\\d+px\\]',
+    'h-\\[\\d+px\\]',
+];
+/**
+ * Regex patterns for hardcoded colors
+ */
+const COLOR_PATTERNS = [
+    // Hex colors: #fff, #ffffff, #ffffffff
+    { pattern: /#(?:[0-9a-fA-F]{3}){1,2}(?:[0-9a-fA-F]{2})?\b/, name: 'hex color' },
+    // RGB/RGBA: rgb(255, 255, 255), rgba(255, 255, 255, 0.5)
+    { pattern: /rgba?\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(?:,\s*[\d.]+\s*)?\)/, name: 'rgb color' },
+    // HSL/HSLA: hsl(360, 100%, 50%), hsla(360, 100%, 50%, 0.5)
+    { pattern: /hsla?\s*\(\s*\d+\s*,\s*[\d.]+%\s*,\s*[\d.]+%\s*(?:,\s*[\d.]+\s*)?\)/, name: 'hsl color' },
+];
+// Note: color allowlist contexts are handled inline in isInAllowlistedContext()
+/**
+ * Regex patterns for spacing values
+ */
+const SPACING_PATTERNS = [
+    // CSS properties with px values
+    { pattern: /(?:padding|margin|gap|top|right|bottom|left|inset):\s*(\d+)px/, property: 'spacing' },
+    { pattern: /(?:padding|margin|gap|top|right|bottom|left|inset)-(?:top|right|bottom|left|x|y):\s*(\d+)px/, property: 'spacing' },
+    // Tailwind arbitrary values
+    { pattern: /(?:p|m|gap|inset|top|right|bottom|left)-\[(\d+)px\]/, property: 'tailwind spacing' },
+    { pattern: /(?:pt|pr|pb|pl|px|py|mt|mr|mb|ml|mx|my)-\[(\d+)px\]/, property: 'tailwind spacing' },
+];
+/**
+ * Regex patterns for font sizes
+ */
+const FONT_SIZE_PATTERNS = [
+    // CSS font-size property
+    { pattern: /font-size:\s*(\d+)px/, property: 'font-size' },
+    // Tailwind arbitrary font sizes
+    { pattern: /text-\[(\d+)px\]/, property: 'tailwind text' },
+];
+/**
+ * Get design system gate configuration
+ */
+function getDesignSystemConfig() {
+    // Read from environment variables (set by index.ts from config)
+    const bannedClassesRaw = process.env['HAWKY_GATE_DESIGN_SYSTEM_BANNED_CLASSES'];
+    const spacingScaleRaw = process.env['HAWKY_GATE_DESIGN_SYSTEM_SPACING_SCALE'];
+    const fontSizeScaleRaw = process.env['HAWKY_GATE_DESIGN_SYSTEM_FONT_SIZE_SCALE'];
+    const allowHardcodedColorsRaw = process.env['HAWKY_GATE_DESIGN_SYSTEM_ALLOW_HARDCODED_COLORS'];
+    return {
+        bannedClasses: bannedClassesRaw ? JSON.parse(bannedClassesRaw) : [],
+        spacingScale: spacingScaleRaw
+            ? JSON.parse(spacingScaleRaw)
+            : [0, 1, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 288, 320, 384],
+        fontSizeScale: fontSizeScaleRaw
+            ? JSON.parse(fontSizeScaleRaw)
+            : [10, 12, 14, 16, 18, 20, 24, 30, 36, 48, 60, 72, 96, 128],
+        allowHardcodedColors: allowHardcodedColorsRaw === 'true',
+    };
+}
+/**
+ * Convert glob pattern to regex
+ * Supports * as wildcard
+ */
+function globToRegex(pattern) {
+    const escaped = pattern
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape special regex chars
+        .replace(/\*/g, '[\\w-]*'); // Convert * to word chars + hyphen
+    return new RegExp(`\\b${escaped}\\b`);
+}
+/**
+ * Find the nearest value in a scale
+ */
+function findNearestInScale(value, scale) {
+    return scale.reduce((prev, curr) => Math.abs(curr - value) < Math.abs(prev - value) ? curr : prev);
+}
+/**
+ * Check if a line is inside a comment or allowlisted context
+ */
+function isInAllowlistedContext(line, matchIndex) {
+    // Check if the match is inside a comment
+    const beforeMatch = line.substring(0, matchIndex);
+    // Single-line comment check
+    if (beforeMatch.includes('//')) {
+        return true;
+    }
+    // Block comment check (simple — doesn't handle multi-line)
+    const lastBlockOpen = beforeMatch.lastIndexOf('/*');
+    const lastBlockClose = beforeMatch.lastIndexOf('*/');
+    if (lastBlockOpen > lastBlockClose) {
+        return true;
+    }
+    return false;
+}
+/**
+ * Scan a single file for banned classes
+ */
+function scanForBannedClasses(content, filePath, bannedPatterns) {
+    const violations = [];
+    const lines = content.split('\n');
+    // Compile patterns (user-provided + defaults)
+    const patterns = [...bannedPatterns, ...DEFAULT_BANNED_PATTERNS].map((p) => {
+        try {
+            // If it looks like a glob pattern (has *), convert it
+            if (p.includes('*') && !p.includes('\\*')) {
+                return globToRegex(p);
+            }
+            // Otherwise treat as regex
+            return new RegExp(p, 'g');
+        }
+        catch {
+            core.debug(`Invalid pattern: ${p}`);
+            return null;
+        }
+    }).filter((p) => p !== null);
+    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+        const line = lines[lineNum] ?? '';
+        for (const pattern of patterns) {
+            // Reset lastIndex for global patterns
+            pattern.lastIndex = 0;
+            let match;
+            while ((match = pattern.exec(line)) !== null) {
+                const matchedText = match[0];
+                const matchIndex = match.index;
+                // Skip if in comment
+                if (isInAllowlistedContext(line, matchIndex)) {
+                    continue;
+                }
+                violations.push({
+                    ruleId: 'design-system/banned-class',
+                    file: filePath,
+                    line: lineNum + 1,
+                    column: matchIndex + 1,
+                    message: `Banned class "${matchedText}" detected. Use design system tokens instead.`,
+                    gate: 'design-system',
+                    severity: 'error',
+                    violationType: 'banned-class',
+                    actualValue: matchedText,
+                    suggestion: 'Replace with design system token class',
+                });
+            }
+        }
+    }
+    return violations;
+}
+/**
+ * Scan a single file for hardcoded colors
+ */
+function scanForHardcodedColors(content, filePath) {
+    const violations = [];
+    const lines = content.split('\n');
+    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+        const line = lines[lineNum] ?? '';
+        // Skip CSS variable definitions (defining tokens is OK)
+        if (/--[\w-]+:/.test(line)) {
+            continue;
+        }
+        for (const { pattern, name } of COLOR_PATTERNS) {
+            const globalPattern = new RegExp(pattern.source, 'gi');
+            let match;
+            while ((match = globalPattern.exec(line)) !== null) {
+                const matchedText = match[0];
+                const matchIndex = match.index;
+                // Skip if in comment
+                if (isInAllowlistedContext(line, matchIndex)) {
+                    continue;
+                }
+                violations.push({
+                    ruleId: 'design-system/hardcoded-color',
+                    file: filePath,
+                    line: lineNum + 1,
+                    column: matchIndex + 1,
+                    message: `Hardcoded ${name} "${matchedText}" detected. Use CSS variables or design tokens instead.`,
+                    gate: 'design-system',
+                    severity: 'error',
+                    violationType: 'hardcoded-color',
+                    actualValue: matchedText,
+                    suggestion: 'Replace with CSS variable (e.g., var(--color-primary)) or Tailwind token',
+                });
+            }
+        }
+    }
+    return violations;
+}
+/**
+ * Scan a single file for non-scale spacing values
+ */
+function scanForSpacingViolations(content, filePath, spacingScale) {
+    const violations = [];
+    const lines = content.split('\n');
+    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+        const line = lines[lineNum] ?? '';
+        for (const { pattern, property } of SPACING_PATTERNS) {
+            const globalPattern = new RegExp(pattern.source, 'gi');
+            let match;
+            while ((match = globalPattern.exec(line)) !== null) {
+                const matchIndex = match.index;
+                const capturedValue = match[1];
+                // Skip if in comment or no captured group
+                if (isInAllowlistedContext(line, matchIndex) || !capturedValue) {
+                    continue;
+                }
+                const value = parseInt(capturedValue, 10);
+                // Check if value is in scale
+                if (!spacingScale.includes(value)) {
+                    const nearest = findNearestInScale(value, spacingScale);
+                    violations.push({
+                        ruleId: 'design-system/spacing-scale',
+                        file: filePath,
+                        line: lineNum + 1,
+                        column: matchIndex + 1,
+                        message: `${property} value ${value}px is not in spacing scale. Nearest scale value: ${nearest}px`,
+                        gate: 'design-system',
+                        severity: 'error',
+                        violationType: 'spacing-scale',
+                        actualValue: value,
+                        suggestion: `Use ${nearest}px instead, or add ${value} to your spacing scale config`,
+                    });
+                }
+            }
+        }
+    }
+    return violations;
+}
+/**
+ * Scan a single file for non-scale font sizes
+ */
+function scanForFontSizeViolations(content, filePath, fontSizeScale) {
+    const violations = [];
+    const lines = content.split('\n');
+    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+        const line = lines[lineNum] ?? '';
+        for (const { pattern, property } of FONT_SIZE_PATTERNS) {
+            const globalPattern = new RegExp(pattern.source, 'gi');
+            let match;
+            while ((match = globalPattern.exec(line)) !== null) {
+                const matchIndex = match.index;
+                const capturedValue = match[1];
+                // Skip if in comment or no captured group
+                if (isInAllowlistedContext(line, matchIndex) || !capturedValue) {
+                    continue;
+                }
+                const value = parseInt(capturedValue, 10);
+                // Check if value is in scale
+                if (!fontSizeScale.includes(value)) {
+                    const nearest = findNearestInScale(value, fontSizeScale);
+                    violations.push({
+                        ruleId: 'design-system/font-size-scale',
+                        file: filePath,
+                        line: lineNum + 1,
+                        column: matchIndex + 1,
+                        message: `${property} value ${value}px is not in font size scale. Nearest scale value: ${nearest}px`,
+                        gate: 'design-system',
+                        severity: 'error',
+                        violationType: 'font-size-scale',
+                        actualValue: value,
+                        suggestion: `Use ${nearest}px or Tailwind class like text-sm, text-base, text-lg`,
+                    });
+                }
+            }
+        }
+    }
+    return violations;
+}
+/**
+ * Convert a design system violation to a GitHub annotation
+ */
+function violationToAnnotation(violation) {
+    const annotation = {
+        file: violation.file,
+        line: violation.line,
+        message: violation.message,
+        severity: 'error',
+        ruleId: violation.ruleId,
+        title: `Design System: ${violation.violationType}`,
+    };
+    if (violation.column !== undefined) {
+        annotation.column = violation.column;
+    }
+    return annotation;
+}
+/**
+ * Get changed files that are scannable
+ */
+async function getScannableFiles(cwd) {
+    const files = [];
+    let output = '';
+    const base = process.env['GITHUB_BASE_REF'] || 'main';
+    try {
+        await exec.exec('git', ['diff', '--name-only', '--diff-filter=ACMR', `origin/${base}...HEAD`], {
+            cwd,
+            silent: true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (data) => {
+                    output += data.toString();
+                },
+            },
+        });
+        const changedFiles = output
+            .split('\n')
+            .map((f) => f.trim())
+            .filter((f) => f.length > 0)
+            .filter((f) => SCANNABLE_EXTENSIONS.some((ext) => f.endsWith(ext)));
+        // Filter to only existing files
+        for (const file of changedFiles) {
+            const fullPath = path.join(cwd, file);
+            if (fs.existsSync(fullPath)) {
+                files.push(file);
+            }
+        }
+    }
+    catch (error) {
+        core.debug(`Failed to get changed files: ${error}`);
+    }
+    return files;
+}
+/**
+ * Design System Gate implementation
+ */
+exports.designSystemGate = {
+    name: 'design-system',
+    displayName: 'Design System',
+    async canRun(cwd) {
+        // Gate can always run — it's static analysis
+        // But we need scannable files to exist
+        const files = await getScannableFiles(cwd);
+        return files.length > 0;
+    },
+    async run(options) {
+        const startTime = Date.now();
+        const { cwd, createAnnotations } = options;
+        // Get configuration
+        const config = getDesignSystemConfig();
+        // Get changed files
+        const files = await getScannableFiles(cwd);
+        if (files.length === 0) {
+            return {
+                gate: 'design-system',
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: 'No CSS/JS/TS files changed in PR',
+            };
+        }
+        core.info(`Scanning ${files.length} file(s) for design system violations...`);
+        const allViolations = [];
+        // Scan each file
+        for (const file of files) {
+            const fullPath = path.join(cwd, file);
+            const content = fs.readFileSync(fullPath, 'utf8');
+            // Normalize file path for consistent reporting
+            const normalizedPath = file.replace(/\\/g, '/');
+            // S026: Banned classes
+            if (config.bannedClasses.length > 0 || DEFAULT_BANNED_PATTERNS.length > 0) {
+                const bannedViolations = scanForBannedClasses(content, normalizedPath, config.bannedClasses);
+                allViolations.push(...bannedViolations);
+            }
+            // S027: Hardcoded colors
+            if (!config.allowHardcodedColors) {
+                const colorViolations = scanForHardcodedColors(content, normalizedPath);
+                allViolations.push(...colorViolations);
+            }
+            // S028: Spacing scale
+            const spacingViolations = scanForSpacingViolations(content, normalizedPath, config.spacingScale);
+            allViolations.push(...spacingViolations);
+            // S029: Font size scale
+            const fontSizeViolations = scanForFontSizeViolations(content, normalizedPath, config.fontSizeScale);
+            allViolations.push(...fontSizeViolations);
+        }
+        const timeMs = Date.now() - startTime;
+        // If no violations, gate passes
+        if (allViolations.length === 0) {
+            return {
+                gate: 'design-system',
+                status: 'pass',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs,
+                message: 'No design system violations found',
+            };
+        }
+        // Create annotations
+        const annotations = [];
+        if (createAnnotations) {
+            for (const violation of allViolations) {
+                annotations.push(violationToAnnotation(violation));
+            }
+        }
+        // Group violations by type for summary
+        const byType = {
+            'banned-class': allViolations.filter((v) => v.violationType === 'banned-class').length,
+            'hardcoded-color': allViolations.filter((v) => v.violationType === 'hardcoded-color').length,
+            'spacing-scale': allViolations.filter((v) => v.violationType === 'spacing-scale').length,
+            'font-size-scale': allViolations.filter((v) => v.violationType === 'font-size-scale').length,
+        };
+        const messageParts = [];
+        if (byType['banned-class'] > 0)
+            messageParts.push(`${byType['banned-class']} banned class(es)`);
+        if (byType['hardcoded-color'] > 0)
+            messageParts.push(`${byType['hardcoded-color']} hardcoded color(s)`);
+        if (byType['spacing-scale'] > 0)
+            messageParts.push(`${byType['spacing-scale']} spacing violation(s)`);
+        if (byType['font-size-scale'] > 0)
+            messageParts.push(`${byType['font-size-scale']} font size violation(s)`);
+        return {
+            gate: 'design-system',
+            status: 'fail',
+            totalViolations: allViolations.length,
+            newViolations: allViolations.length, // Caller updates after filtering
+            existingViolations: 0,
+            ignoredViolations: 0,
+            annotations,
+            violations: allViolations,
+            timeMs,
+            message: messageParts.join(', '),
+        };
+    },
+};
+exports["default"] = exports.designSystemGate;
 
 
 /***/ }),
@@ -32457,7 +32988,7 @@ exports["default"] = exports.gitleaksGate;
  * Exports all gate implementations and common types.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.gitleaksViolationToAnnotation = exports.gitleaksGetChangedFiles = exports.parseGitleaksOutput = exports.gitleaksGate = exports.semgrepViolationToAnnotation = exports.semgrepGetChangedFiles = exports.parseSemgrepOutputWithSeverity = exports.parseSemgrepOutput = exports.semgrepGate = exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
+exports.designSystemViolationToAnnotation = exports.scanForFontSizeViolations = exports.scanForSpacingViolations = exports.scanForHardcodedColors = exports.scanForBannedClasses = exports.designSystemGate = exports.npmAuditViolationToAnnotation = exports.parseNpmAuditOutput = exports.npmAuditGate = exports.gitleaksViolationToAnnotation = exports.gitleaksGetChangedFiles = exports.parseGitleaksOutput = exports.gitleaksGate = exports.semgrepViolationToAnnotation = exports.semgrepGetChangedFiles = exports.parseSemgrepOutputWithSeverity = exports.parseSemgrepOutput = exports.semgrepGate = exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
 // TypeScript Gate
 var typescript_1 = __nccwpck_require__(9249);
 Object.defineProperty(exports, "typescriptGate", ({ enumerable: true, get: function () { return typescript_1.typescriptGate; } }));
@@ -32483,6 +33014,420 @@ Object.defineProperty(exports, "gitleaksGate", ({ enumerable: true, get: functio
 Object.defineProperty(exports, "parseGitleaksOutput", ({ enumerable: true, get: function () { return gitleaks_1.parseGitleaksOutput; } }));
 Object.defineProperty(exports, "gitleaksGetChangedFiles", ({ enumerable: true, get: function () { return gitleaks_1.getChangedFiles; } }));
 Object.defineProperty(exports, "gitleaksViolationToAnnotation", ({ enumerable: true, get: function () { return gitleaks_1.violationToAnnotation; } }));
+// npm Audit Gate
+var npm_audit_1 = __nccwpck_require__(4675);
+Object.defineProperty(exports, "npmAuditGate", ({ enumerable: true, get: function () { return npm_audit_1.npmAuditGate; } }));
+Object.defineProperty(exports, "parseNpmAuditOutput", ({ enumerable: true, get: function () { return npm_audit_1.parseNpmAuditOutput; } }));
+Object.defineProperty(exports, "npmAuditViolationToAnnotation", ({ enumerable: true, get: function () { return npm_audit_1.violationToAnnotation; } }));
+// Design System Gate
+var design_system_1 = __nccwpck_require__(6088);
+Object.defineProperty(exports, "designSystemGate", ({ enumerable: true, get: function () { return design_system_1.designSystemGate; } }));
+Object.defineProperty(exports, "scanForBannedClasses", ({ enumerable: true, get: function () { return design_system_1.scanForBannedClasses; } }));
+Object.defineProperty(exports, "scanForHardcodedColors", ({ enumerable: true, get: function () { return design_system_1.scanForHardcodedColors; } }));
+Object.defineProperty(exports, "scanForSpacingViolations", ({ enumerable: true, get: function () { return design_system_1.scanForSpacingViolations; } }));
+Object.defineProperty(exports, "scanForFontSizeViolations", ({ enumerable: true, get: function () { return design_system_1.scanForFontSizeViolations; } }));
+Object.defineProperty(exports, "designSystemViolationToAnnotation", ({ enumerable: true, get: function () { return design_system_1.violationToAnnotation; } }));
+
+
+/***/ }),
+
+/***/ 4675:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * npm Audit Gate
+ *
+ * Runs `npm audit` to detect known vulnerabilities in dependencies.
+ * - Critical/High severity findings are blocking by default
+ * - Medium/Low severity findings are non-blocking (warnings)
+ * - Configurable severity threshold via environment variable
+ *
+ * npm audit JSON format (v7+):
+ * { vulnerabilities: { [name]: { name, severity, via, effects, ... } }, metadata: { ... } }
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.npmAuditGate = void 0;
+exports.parseNpmAuditOutput = parseNpmAuditOutput;
+exports.violationToAnnotation = violationToAnnotation;
+const core = __importStar(__nccwpck_require__(7484));
+const exec = __importStar(__nccwpck_require__(5236));
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+/**
+ * Default severity threshold - vulnerabilities at or above this level block
+ */
+const DEFAULT_BLOCKING_SEVERITY = 'high';
+/**
+ * Severity ordering for comparison
+ */
+const SEVERITY_ORDER = {
+    critical: 4,
+    high: 3,
+    moderate: 2,
+    low: 1,
+    info: 0,
+};
+/**
+ * Check if severity A is at or above severity B
+ */
+function isAtOrAboveSeverity(a, b) {
+    return SEVERITY_ORDER[a] >= SEVERITY_ORDER[b];
+}
+/**
+ * Map npm severity to our severity levels
+ */
+function mapSeverity(npmSeverity, blockingThreshold) {
+    return isAtOrAboveSeverity(npmSeverity, blockingThreshold) ? 'error' : 'warning';
+}
+/**
+ * Get human-readable description for a vulnerability
+ */
+function getVulnerabilityMessage(vuln) {
+    const viaInfo = vuln.via
+        .map((v) => (typeof v === 'string' ? v : v.title || 'Unknown vulnerability'))
+        .join(', ');
+    const fixInfo = vuln.fixAvailable
+        ? typeof vuln.fixAvailable === 'object'
+            ? ` (fix: update to ${vuln.fixAvailable.name}@${vuln.fixAvailable.version}${vuln.fixAvailable.isSemVerMajor ? ' - BREAKING' : ''})`
+            : ' (fix available)'
+        : ' (no fix available)';
+    return `${vuln.severity.toUpperCase()} vulnerability in ${vuln.name}: ${viaInfo}${fixInfo}`;
+}
+/**
+ * Parse npm audit JSON output into violations
+ */
+function parseNpmAuditOutput(output, blockingThreshold) {
+    const violations = [];
+    const errors = [];
+    const warnings = [];
+    try {
+        const data = JSON.parse(output);
+        if (!data.vulnerabilities) {
+            core.debug('npm audit output has no vulnerabilities object');
+            return { violations, errors, warnings };
+        }
+        for (const [, vuln] of Object.entries(data.vulnerabilities)) {
+            const severity = mapSeverity(vuln.severity, blockingThreshold);
+            const message = getVulnerabilityMessage(vuln);
+            const violation = {
+                ruleId: `npm-audit-${vuln.severity}`,
+                file: 'package.json',
+                line: 1,
+                column: 1,
+                message,
+                gate: 'npm-audit',
+                severity,
+            };
+            violations.push(violation);
+            if (severity === 'error') {
+                errors.push(violation);
+            }
+            else {
+                warnings.push(violation);
+            }
+        }
+    }
+    catch (error) {
+        core.debug(`Failed to parse npm audit JSON output: ${error}`);
+    }
+    return { violations, errors, warnings };
+}
+/**
+ * Convert a violation to a GitHub annotation
+ */
+function violationToAnnotation(violation, severity) {
+    return {
+        file: violation.file,
+        line: violation.line,
+        message: violation.message,
+        severity,
+        ruleId: violation.ruleId,
+        title: `npm audit: ${violation.ruleId.replace('npm-audit-', '')}`,
+    };
+}
+/**
+ * Check if npm is available
+ */
+async function checkNpmAvailable() {
+    try {
+        let version = '';
+        const exitCode = await exec.exec('npm', ['--version'], {
+            silent: true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (data) => {
+                    version += data.toString();
+                },
+            },
+        });
+        if (exitCode === 0 && version.trim()) {
+            return { available: true, version: version.trim() };
+        }
+        return { available: false, reason: 'npm returned empty version' };
+    }
+    catch {
+        return { available: false, reason: 'npm not found' };
+    }
+}
+/**
+ * Check if package.json exists
+ */
+function hasPackageJson(cwd) {
+    return fs.existsSync(path.join(cwd, 'package.json'));
+}
+/**
+ * Check if package-lock.json exists
+ */
+function hasPackageLock(cwd) {
+    return fs.existsSync(path.join(cwd, 'package-lock.json'));
+}
+/**
+ * Run npm audit
+ */
+async function runNpmAudit(cwd, timeoutMs) {
+    let output = '';
+    let stderr = '';
+    let exitCode = 0;
+    let timedOut = false;
+    // Build command: npm audit --json
+    // Note: npm audit exit code is:
+    // 0 = no vulnerabilities
+    // 1 = vulnerabilities found
+    // We need to ignore the return code to capture the JSON output
+    const args = ['audit', '--json'];
+    core.debug(`Running: npm ${args.join(' ')}`);
+    const execPromise = exec.exec('npm', args, {
+        cwd,
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => {
+                output += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    });
+    // Create timeout promise
+    const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => {
+            timedOut = true;
+            resolve(-1);
+        }, timeoutMs);
+    });
+    // Race between exec and timeout
+    exitCode = await Promise.race([execPromise, timeoutPromise]);
+    if (stderr) {
+        core.debug(`npm audit stderr: ${stderr}`);
+    }
+    return { output, exitCode, timedOut };
+}
+/**
+ * npm Audit Gate implementation
+ */
+exports.npmAuditGate = {
+    name: 'npm-audit',
+    displayName: 'npm Audit',
+    async canRun(cwd) {
+        // Check if npm is available
+        const npmCheck = await checkNpmAvailable();
+        if (!npmCheck.available) {
+            core.debug(`npm not available: ${npmCheck.reason}`);
+            return false;
+        }
+        // Check if package.json exists
+        if (!hasPackageJson(cwd)) {
+            core.debug('package.json not found');
+            return false;
+        }
+        return true;
+    },
+    async run(options) {
+        const startTime = Date.now();
+        const { cwd, timeoutMs, createAnnotations } = options;
+        // Check if we can run
+        const npmCheck = await checkNpmAvailable();
+        if (!npmCheck.available) {
+            return {
+                gate: 'npm-audit',
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: npmCheck.reason || 'npm not available',
+            };
+        }
+        if (!hasPackageJson(cwd)) {
+            return {
+                gate: 'npm-audit',
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: 'No package.json found',
+            };
+        }
+        // Warn if no package-lock.json (audit may be less accurate)
+        if (!hasPackageLock(cwd)) {
+            core.warning('No package-lock.json found. npm audit may report incorrect results.');
+        }
+        core.info(`npm version: ${npmCheck.version}`);
+        // Get severity threshold from environment or use default
+        const thresholdEnv = process.env['HAWKY_GATE_NPM_AUDIT_THRESHOLD'];
+        const blockingThreshold = thresholdEnv && ['critical', 'high', 'moderate', 'low', 'info'].includes(thresholdEnv)
+            ? thresholdEnv
+            : DEFAULT_BLOCKING_SEVERITY;
+        core.info(`Blocking severity threshold: ${blockingThreshold}`);
+        try {
+            // Run npm audit
+            const { output, timedOut } = await runNpmAudit(cwd, timeoutMs);
+            if (timedOut) {
+                return {
+                    gate: 'npm-audit',
+                    status: 'error',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs: Date.now() - startTime,
+                    message: `npm audit timed out after ${timeoutMs}ms`,
+                    error: 'Timeout',
+                    rawOutput: output,
+                };
+            }
+            // Check if output is valid JSON
+            try {
+                JSON.parse(output);
+            }
+            catch {
+                return {
+                    gate: 'npm-audit',
+                    status: 'error',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs: Date.now() - startTime,
+                    message: 'npm audit output was not valid JSON',
+                    error: 'Invalid JSON output',
+                    rawOutput: output.substring(0, 1000),
+                };
+            }
+            // Parse output
+            const { violations, errors, warnings } = parseNpmAuditOutput(output, blockingThreshold);
+            const timeMs = Date.now() - startTime;
+            // If no violations, gate passes
+            if (violations.length === 0) {
+                return {
+                    gate: 'npm-audit',
+                    status: 'pass',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs,
+                    message: 'No vulnerabilities found',
+                    rawOutput: output,
+                };
+            }
+            // Create annotations
+            const annotations = [];
+            if (createAnnotations) {
+                for (const error of errors) {
+                    annotations.push(violationToAnnotation(error, 'error'));
+                }
+                for (const warning of warnings) {
+                    annotations.push(violationToAnnotation(warning, 'warning'));
+                }
+            }
+            // Determine status based on blocking violations
+            const status = errors.length > 0 ? 'fail' : 'pass';
+            return {
+                gate: 'npm-audit',
+                status,
+                totalViolations: violations.length,
+                newViolations: violations.length, // Caller updates after filtering
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations,
+                violations,
+                timeMs,
+                message: errors.length > 0
+                    ? `${errors.length} blocking vulnerability(ies), ${warnings.length} other(s)`
+                    : `${warnings.length} non-blocking vulnerability(ies)`,
+                rawOutput: output,
+            };
+        }
+        catch (error) {
+            const timeMs = Date.now() - startTime;
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            return {
+                gate: 'npm-audit',
+                status: 'error',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs,
+                message: `npm audit failed: ${errorMessage}`,
+                error: errorMessage,
+            };
+        }
+    },
+};
+exports["default"] = exports.npmAuditGate;
 
 
 /***/ }),
@@ -34076,6 +35021,23 @@ async function run() {
                     }
                 }
             }
+            else if (gateName === 'design-system') {
+                // S026-S029: Design System Gate
+                // Set configuration via environment variables
+                process.env['HAWKY_GATE_DESIGN_SYSTEM_BANNED_CLASSES'] = JSON.stringify(gateConfig.bannedClasses || []);
+                process.env['HAWKY_GATE_DESIGN_SYSTEM_SPACING_SCALE'] = JSON.stringify(gateConfig.spacingScale || []);
+                process.env['HAWKY_GATE_DESIGN_SYSTEM_FONT_SIZE_SCALE'] = JSON.stringify(gateConfig.fontSizeScale || []);
+                process.env['HAWKY_GATE_DESIGN_SYSTEM_ALLOW_HARDCODED_COLORS'] = String(gateConfig.allowHardcodedColors || false);
+                result = await gates_1.designSystemGate.run({
+                    cwd,
+                    timeoutMs,
+                    createAnnotations: true,
+                });
+                // Apply baseline and hawkyignore filtering
+                if (result.violations.length > 0) {
+                    result = filterViolations(result, baseline, ignorePatterns, cwd);
+                }
+            }
             else {
                 // Unsupported gate (build, test not yet implemented)
                 result = {
@@ -35053,6 +36015,8 @@ exports.GATE_DISPLAY_NAMES = {
     gitleaks: 'Gitleaks',
     build: 'Build',
     test: 'Test',
+    'npm-audit': 'npm Audit',
+    'design-system': 'Design System',
 };
 
 
