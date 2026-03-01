@@ -8,4 +8,5 @@ export { typescriptGate, parseTypeScriptOutput, violationToAnnotation, } from '.
 export { eslintGate, parseESLintOutput, parseESLintOutputWithSeverity, getChangedFiles, violationToAnnotation as eslintViolationToAnnotation, } from './eslint';
 export { semgrepGate, parseSemgrepOutput, parseSemgrepOutputWithSeverity, getChangedFiles as semgrepGetChangedFiles, violationToAnnotation as semgrepViolationToAnnotation, } from './semgrep';
 export { gitleaksGate, parseGitleaksOutput, getChangedFiles as gitleaksGetChangedFiles, violationToAnnotation as gitleaksViolationToAnnotation, } from './gitleaks';
+export { frontendChecksGate, scanForUnhandledAsyncState, scanForMissingKeys, scanForMissingDependencies, scanForRerenderTraps, scanForServerClientBoundary, scanForA11yIssues, calculateBundleDelta, scanForImageWithoutDimensions, scanForTypeScriptStrictIssues, buildDependencyGraph, detectCycles, scanForImportCycles, buildComponentGraph, analyzeComponentGraphImpact, scanForImportPathInconsistency, violationToAnnotation as frontendViolationToAnnotation, type BundleSizeDelta, type ComponentGraphEntry, } from './frontend-checks';
 //# sourceMappingURL=index.d.ts.map
