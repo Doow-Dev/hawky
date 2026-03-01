@@ -65,6 +65,15 @@ export const GITLEAKS_GATE_DEFAULTS: GateConfig = {
 };
 
 /**
+ * Default configuration for the npm Audit gate
+ */
+export const NPM_AUDIT_GATE_DEFAULTS: GateConfig = {
+  enabled: true,
+  blocking: true,
+  timeout: 120, // 2 minutes
+};
+
+/**
  * Map of gate names to their default configurations
  */
 export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
@@ -74,6 +83,7 @@ export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
   eslint: ESLINT_GATE_DEFAULTS,
   semgrep: SEMGREP_GATE_DEFAULTS,
   gitleaks: GITLEAKS_GATE_DEFAULTS,
+  'npm-audit': NPM_AUDIT_GATE_DEFAULTS,
 };
 
 /**
@@ -107,6 +117,7 @@ export function createDefaultConfig(): HawkyConfig {
       eslint: { ...ESLINT_GATE_DEFAULTS },
       semgrep: { ...SEMGREP_GATE_DEFAULTS },
       gitleaks: { ...GITLEAKS_GATE_DEFAULTS },
+      'npm-audit': { ...NPM_AUDIT_GATE_DEFAULTS },
     },
     gracePeriod: { ...GRACE_PERIOD_DEFAULTS },
   };

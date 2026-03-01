@@ -47,3 +47,10 @@ export {
   getChangedFiles as gitleaksGetChangedFiles,
   violationToAnnotation as gitleaksViolationToAnnotation,
 } from './gitleaks';
+
+// npm Audit Gate
+export {
+  npmAuditGate,
+  parseNpmAuditOutput,
+  violationToAnnotation as npmAuditViolationToAnnotation,
+} from './npm-audit';

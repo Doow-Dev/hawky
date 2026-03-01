@@ -169,4 +169,5 @@ export const GATE_DISPLAY_NAMES: Record<GateName, string> = {
   gitleaks: 'Gitleaks',
   build: 'Build',
   test: 'Test',
+  'npm-audit': 'npm Audit',
 };
