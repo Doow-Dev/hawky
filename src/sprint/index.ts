@@ -83,3 +83,24 @@ export {
   buildClosedEntry,
   generateActivityEntries,
 } from './activity-logging';
+
+export {
+  // Types
+  type SprintLabel,
+  type SprintStatusResult,
+  type SprintStatusOpenOptions,
+  type SprintStatusMergeOptions,
+  type SprintStatusOctokitLike,
+  // Constants
+  SPRINT_LABEL_REVIEW,
+  SPRINT_LABEL_DONE,
+  SPRINT_LABEL_BLOCKED,
+  // Functions
+  extractStoryId,
+  buildOpenPRComment,
+  buildMergePRComment,
+  applyPROpenedStatus,
+  applyPRMergedStatus,
+  applyOpenedStatus,
+  applyMergedStatus,
+} from './pr-status';
