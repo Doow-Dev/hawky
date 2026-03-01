@@ -51,3 +51,17 @@ export {
   detectScopeCreep,
   formatScopeCreepWarning,
 } from './scope-creep';
+
+export {
+  // Types
+  type Notification,
+  type RoutingRule,
+  type NotificationRoutingResult,
+  type NotificationRoutingOptions,
+  // Constants
+  DEFAULT_ROUTING_RULES,
+  // Functions
+  filesMatchRoutingRule,
+  formatNotificationEntry,
+  routeNotifications,
+} from './notifications-routing';
