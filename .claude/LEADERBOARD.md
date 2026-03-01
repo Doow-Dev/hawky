@@ -123,9 +123,9 @@ _Date: 2026-02-22_
 | Auth Guard Completeness | S017 | Luna | Hawk | Godel | **RESOLVED** by @Latch |
 | IDOR Patterns rule | S018 | Luna | Hawk | Godel | **RESOLVED** by @Latch |
 | Duplicate Implementation | S044 | — | — | — | **DEFERRED-V2** per spec |
-| Suppression Dashboard | S085 | Latch | Hawk | Godel | ASSIGNED |
+| Suppression Dashboard | S085 | Latch | Hawk | Godel | **RESOLVED** by @Latch |
 | LLM gate wiring | — | Godel | — | — | **RESOLVED** |
-| Coordination wiring | — | — | — | — | **NEEDS STORY** — modules exist but not integrated into action |
+| Coordination wiring | S096 | Latch | Hawk | Godel | **RESOLVED** by @Latch |
 
 **Pattern:** Coordination failure. No story-level verification. Hawk didn't catch in reviews. Godel didn't track.
 
