@@ -170,4 +170,5 @@ export const GATE_DISPLAY_NAMES: Record<GateName, string> = {
   build: 'Build',
   test: 'Test',
   'npm-audit': 'npm Audit',
+  'design-system': 'Design System',
 };

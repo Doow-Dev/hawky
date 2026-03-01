@@ -28,6 +28,7 @@ import {
   eslintGate,
   semgrepGate,
   gitleaksGate,
+  designSystemGate,
   violationToAnnotation,
   type GateResult,
   type Violation,
@@ -458,6 +459,24 @@ async function run(): Promise<void> {
               `Secrets should NEVER be grandfathered — they must be rotated immediately.`
             );
           }
+        }
+      } else if (gateName === 'design-system') {
+        // S026-S029: Design System Gate
+        // Set configuration via environment variables
+        process.env['HAWKY_GATE_DESIGN_SYSTEM_BANNED_CLASSES'] = JSON.stringify(gateConfig.bannedClasses || []);
+        process.env['HAWKY_GATE_DESIGN_SYSTEM_SPACING_SCALE'] = JSON.stringify(gateConfig.spacingScale || []);
+        process.env['HAWKY_GATE_DESIGN_SYSTEM_FONT_SIZE_SCALE'] = JSON.stringify(gateConfig.fontSizeScale || []);
+        process.env['HAWKY_GATE_DESIGN_SYSTEM_ALLOW_HARDCODED_COLORS'] = String(gateConfig.allowHardcodedColors || false);
+
+        result = await designSystemGate.run({
+          cwd,
+          timeoutMs,
+          createAnnotations: true,
+        });
+
+        // Apply baseline and hawkyignore filtering
+        if (result.violations.length > 0) {
+          result = filterViolations(result, baseline, ignorePatterns, cwd);
         }
       } else {
         // Unsupported gate (build, test not yet implemented)

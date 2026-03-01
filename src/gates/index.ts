@@ -54,3 +54,13 @@ export {
   parseNpmAuditOutput,
   violationToAnnotation as npmAuditViolationToAnnotation,
 } from './npm-audit';
+
+// Design System Gate
+export {
+  designSystemGate,
+  scanForBannedClasses,
+  scanForHardcodedColors,
+  scanForSpacingViolations,
+  scanForFontSizeViolations,
+  violationToAnnotation as designSystemViolationToAnnotation,
+} from './design-system';

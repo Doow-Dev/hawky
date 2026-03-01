@@ -74,6 +74,19 @@ export const NPM_AUDIT_GATE_DEFAULTS: GateConfig = {
 };
 
 /**
+ * Default configuration for the Design System gate
+ */
+export const DESIGN_SYSTEM_GATE_DEFAULTS: GateConfig = {
+  enabled: false, // Opt-in by default — not all projects use design systems
+  blocking: true,
+  timeout: 120, // 2 minutes — static analysis is fast
+  bannedClasses: [],
+  spacingScale: [0, 1, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 288, 320, 384],
+  fontSizeScale: [10, 12, 14, 16, 18, 20, 24, 30, 36, 48, 60, 72, 96, 128],
+  allowHardcodedColors: false,
+};
+
+/**
  * Map of gate names to their default configurations
  */
 export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
@@ -84,6 +97,7 @@ export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
   semgrep: SEMGREP_GATE_DEFAULTS,
   gitleaks: GITLEAKS_GATE_DEFAULTS,
   'npm-audit': NPM_AUDIT_GATE_DEFAULTS,
+  'design-system': DESIGN_SYSTEM_GATE_DEFAULTS,
 };
 
 /**
@@ -118,6 +132,7 @@ export function createDefaultConfig(): HawkyConfig {
       semgrep: { ...SEMGREP_GATE_DEFAULTS },
       gitleaks: { ...GITLEAKS_GATE_DEFAULTS },
       'npm-audit': { ...NPM_AUDIT_GATE_DEFAULTS },
+      'design-system': { ...DESIGN_SYSTEM_GATE_DEFAULTS },
     },
     gracePeriod: { ...GRACE_PERIOD_DEFAULTS },
   };

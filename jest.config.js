@@ -14,8 +14,9 @@ module.exports = {
       },
     ],
   },
-  // Mock @actions/core for testing
+  // Mock @actions packages for testing
   moduleNameMapper: {
     '^@actions/core$': '<rootDir>/__tests__/mocks/actions-core.ts',
+    '^@actions/exec$': '<rootDir>/__tests__/mocks/actions-exec.ts',
   },
 };

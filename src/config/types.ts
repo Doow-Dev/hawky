@@ -15,7 +15,8 @@ export type GateName =
   | 'eslint'
   | 'semgrep'
   | 'gitleaks'
-  | 'npm-audit';
+  | 'npm-audit'
+  | 'design-system';
 
 /**
  * All valid gate names
@@ -28,6 +29,7 @@ export const GATE_NAMES: GateName[] = [
   'semgrep',
   'gitleaks',
   'npm-audit',
+  'design-system',
 ];
 
 /**
@@ -48,6 +50,18 @@ export interface GateConfig {
 
   /** Semgrep-specific: ruleset to use (default: 'p/security-audit') */
   rulesets?: string;
+
+  /** Design-system-specific: banned Tailwind class patterns */
+  bannedClasses?: string[];
+
+  /** Design-system-specific: allowed spacing scale in px (default: 4,8,12,16,20,24,32,40,48,64) */
+  spacingScale?: number[];
+
+  /** Design-system-specific: allowed font sizes in px (default: 12,14,16,18,20,24,30,36,48,60,72) */
+  fontSizeScale?: number[];
+
+  /** Design-system-specific: whether to allow hardcoded colors (default: false) */
+  allowHardcodedColors?: boolean;
 }
 
 /**
