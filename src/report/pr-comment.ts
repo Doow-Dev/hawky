@@ -7,7 +7,7 @@
 
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import type { ReportData, ReportConfig, GateSummary, SuppressionEntry } from './types';
+import type { ReportData, ReportConfig, GateSummary, SuppressionEntry, CoordinationFinding } from './types';
 import { DEFAULT_REPORT_CONFIG, GATE_DISPLAY_NAMES } from './types';
 
 /**
@@ -236,6 +236,60 @@ function generateSkippedSection(gates: GateSummary[]): string {
 }
 
 /**
+ * Generate coordination findings section
+ *
+ * S096: Coordination Integration
+ */
+function generateCoordinationSection(findings: CoordinationFinding[]): string {
+  if (!findings || findings.length === 0) {
+    return '';
+  }
+
+  const lines: string[] = [];
+
+  // Group by tier
+  const blockFindings = findings.filter((f) => f.tier === 'block');
+  const warnFindings = findings.filter((f) => f.tier === 'warn');
+  const informFindings = findings.filter((f) => f.tier === 'inform');
+
+  // Header
+  lines.push('### Coordination');
+  lines.push('');
+
+  // Block tier (most serious)
+  if (blockFindings.length > 0) {
+    lines.push(':no_entry: **Blocking Issues**');
+    lines.push('');
+    for (const finding of blockFindings) {
+      lines.push(finding.details);
+      lines.push('');
+    }
+  }
+
+  // Warn tier
+  if (warnFindings.length > 0) {
+    lines.push(':warning: **Warnings**');
+    lines.push('');
+    for (const finding of warnFindings) {
+      lines.push(finding.details);
+      lines.push('');
+    }
+  }
+
+  // Inform tier
+  if (informFindings.length > 0) {
+    lines.push(':information_source: **Information**');
+    lines.push('');
+    for (const finding of informFindings) {
+      lines.push(finding.details);
+      lines.push('');
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Generate grace period section
  */
 function generateGracePeriodSection(data: ReportData): string {
@@ -381,6 +435,11 @@ export function generatePRComment(
   // Gate results table
   lines.push(generateGateTable(data.gates, config));
   lines.push('');
+
+  // Coordination findings section (S096)
+  if (data.coordinationFindings && data.coordinationFindings.length > 0) {
+    lines.push(generateCoordinationSection(data.coordinationFindings));
+  }
 
   // Detail sections (collapsible)
   if (config.includeDetails) {

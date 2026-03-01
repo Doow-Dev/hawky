@@ -42,7 +42,40 @@ import {
   type ReportData,
   type GateSummary,
   type SuppressionEntry,
+  type CoordinationFinding,
 } from './report';
+import {
+  detectConcurrentPRs,
+  formatConcurrentPRWarning,
+  detectContractDivergence,
+  formatContractDivergenceBlock,
+  detectParallelMigrations,
+  formatSchemaMigrationBlock,
+  checkStaleBranch,
+  formatStaleBranchWarning,
+  detectSpecMismatch,
+  formatSpecMismatchWarning,
+  detectOwnershipCollisions,
+  formatOwnershipCollisionWarning,
+  enforceDependencies,
+  formatDependencyBlock,
+  generateHandoffNotifications,
+  detectTestCountRegression,
+  formatTestCountRegressionWarning,
+  detectMixedAuthorship,
+  formatAuthorshipAttribution,
+  type ConcurrentPRResult,
+  type ContractDivergenceResult,
+  type SchemaMigrationResult,
+  type StaleCheckResult,
+  type SpecMismatchResult,
+  type OwnershipCollisionResult,
+  type DependencyEnforcementResult,
+  type HandoffResult,
+  type TestCountRegressionResult,
+  type AuthorshipResult,
+} from './coordination';
+import * as fs from 'fs';
 
 /**
  * Operating mode for Hawky
@@ -575,8 +608,415 @@ async function run(): Promise<void> {
       core.endGroup();
     }
 
-    // Set outputs
-    const overallStatus = hasBlockingFailure ? 'fail' : 'pass';
+    // S096: Run Coordination Phase
+    const coordinationFindings: CoordinationFinding[] = [];
+    let hasCoordinationBlock = false;
+
+    const context = github.context;
+    const pr = context.payload.pull_request;
+    const prNumber = pr?.number;
+    const prHead = pr?.['head'] as Record<string, unknown> | undefined;
+    const prBase = pr?.['base'] as Record<string, unknown> | undefined;
+    const headBranch = prHead?.['ref'] as string | undefined;
+    const baseBranch = prBase?.['ref'] as string | undefined;
+    const prBody = (pr?.['body'] as string) || '';
+
+    if (config.coordination.enabled && prNumber && headBranch && baseBranch && inputs.githubToken) {
+      core.startGroup('Running Coordination Checks');
+      core.info(`Coordination enabled — running checks on PR #${prNumber}`);
+
+      const octokit = github.getOctokit(inputs.githubToken);
+      const repoParts = context.repo;
+      const owner = repoParts.owner;
+      const repo = repoParts.repo;
+
+      // Get changed files from PR
+      let changedFiles: string[] = [];
+      try {
+        const { data: files } = await octokit.rest.pulls.listFiles({
+          owner,
+          repo,
+          pull_number: prNumber,
+          per_page: 100,
+        });
+        changedFiles = files.map((f) => f.filename);
+        core.info(`PR has ${changedFiles.length} changed file(s)`);
+      } catch (err) {
+        core.warning(`Failed to get PR files: ${err}`);
+      }
+
+      // Run coordination checks in parallel where possible
+      const coordinationPromises: Promise<void>[] = [];
+
+      // S035: Concurrent PRs (WARN)
+      if (config.coordination.concurrentPrs && changedFiles.length > 0) {
+        coordinationPromises.push(
+          (async () => {
+            try {
+              const result: ConcurrentPRResult = await detectConcurrentPRs({
+                octokit,
+                owner,
+                repo,
+                currentPRNumber: prNumber,
+                currentPRFiles: changedFiles,
+                baseBranch,
+              });
+              if (result.hasConcurrentPRs) {
+                const details = formatConcurrentPRWarning(result);
+                coordinationFindings.push({
+                  check: 'concurrent_prs',
+                  tier: 'warn',
+                  summary: `${result.conflictingPRs.length} concurrent PR(s) touch same files`,
+                  details,
+                  blocking: false,
+                });
+                core.info(`[WARN] Concurrent PRs: ${result.conflictingPRs.length} overlapping`);
+              } else {
+                core.info('[PASS] Concurrent PRs: No conflicts');
+              }
+            } catch (err) {
+              core.warning(`Concurrent PRs check failed: ${err}`);
+            }
+          })()
+        );
+      }
+
+      // S036: Contract Divergence (BLOCK)
+      if (config.coordination.contractDivergence && changedFiles.length > 0) {
+        coordinationPromises.push(
+          (async () => {
+            try {
+              const result: ContractDivergenceResult = await detectContractDivergence({
+                octokit,
+                owner,
+                repo,
+                headBranch,
+                baseBranch,
+                changedFiles,
+                prBody,
+              });
+              if (result.hasDivergence) {
+                const details = formatContractDivergenceBlock(result);
+                coordinationFindings.push({
+                  check: 'contract_divergence',
+                  tier: 'block',
+                  summary: `API contract divergence with ${result.frontendPRs.length} frontend PR(s)`,
+                  details,
+                  blocking: true,
+                });
+                hasCoordinationBlock = true;
+                core.info(`[BLOCK] Contract Divergence: ${result.frontendPRs.length} frontend PRs affected`);
+              } else {
+                core.info('[PASS] Contract Divergence: No divergence');
+              }
+            } catch (err) {
+              core.warning(`Contract divergence check failed: ${err}`);
+            }
+          })()
+        );
+      }
+
+      // S037: Parallel Migrations (BLOCK)
+      if (config.coordination.parallelMigrations && changedFiles.length > 0) {
+        coordinationPromises.push(
+          (async () => {
+            try {
+              const result: SchemaMigrationResult = await detectParallelMigrations({
+                octokit,
+                owner,
+                repo,
+                currentPRNumber: prNumber,
+                currentPRFiles: changedFiles,
+                baseBranch,
+              });
+              if (result.hasParallelMigrations) {
+                const details = formatSchemaMigrationBlock(result);
+                coordinationFindings.push({
+                  check: 'parallel_migrations',
+                  tier: 'block',
+                  summary: `${result.migrationPRs.length + 1} PR(s) with database migrations`,
+                  details,
+                  blocking: true,
+                });
+                hasCoordinationBlock = true;
+                core.info(`[BLOCK] Parallel Migrations: ${result.migrationPRs.length} other PRs have migrations`);
+              } else if (result.currentPRMigrations.length > 0) {
+                core.info(`[PASS] Parallel Migrations: This PR has migrations but no conflicts`);
+              } else {
+                core.info('[PASS] Parallel Migrations: No migrations in this PR');
+              }
+            } catch (err) {
+              core.warning(`Parallel migrations check failed: ${err}`);
+            }
+          })()
+        );
+      }
+
+      // S038: Stale Branch (WARN)
+      if (config.coordination.staleBranch) {
+        coordinationPromises.push(
+          (async () => {
+            try {
+              const result: StaleCheckResult = await checkStaleBranch({
+                octokit: octokit as unknown as import('./coordination').StaleOctokitLike,
+                owner,
+                repo,
+                headBranch,
+                baseBranch,
+                threshold: config.coordination.staleBranchCommits,
+                daysThreshold: config.coordination.staleBranchDays,
+              });
+              if (result.isStale) {
+                const details = formatStaleBranchWarning(result);
+                coordinationFindings.push({
+                  check: 'stale_branch',
+                  tier: 'warn',
+                  summary: `Branch is ${result.commitsBehind} commits behind ${baseBranch}`,
+                  details,
+                  blocking: false,
+                });
+                core.info(`[WARN] Stale Branch: ${result.commitsBehind} commits behind`);
+              } else {
+                core.info(`[PASS] Stale Branch: Only ${result.commitsBehind} commits behind (threshold: ${result.threshold})`);
+              }
+            } catch (err) {
+              core.warning(`Stale branch check failed: ${err}`);
+            }
+          })()
+        );
+      }
+
+      // S039: Spec Mismatch (WARN) - only if spec files were changed
+      if (config.coordination.specMismatch && changedFiles.length > 0) {
+        const specFiles = changedFiles.filter((f) =>
+          /\.(md|yaml|yml|json|graphql|gql|proto)$/i.test(f) &&
+          /(spec|schema|openapi|swagger|design)/i.test(f)
+        );
+        if (specFiles.length > 0) {
+          coordinationPromises.push(
+            (async () => {
+              try {
+                const result: SpecMismatchResult = await detectSpecMismatch({
+                  octokit: octokit as unknown as import('./coordination').SpecMismatchOctokitLike,
+                  owner,
+                  repo,
+                  headBranch,
+                  baseBranch,
+                  specFiles,
+                });
+                if (result.hasStaleSpecs) {
+                  const details = formatSpecMismatchWarning(result);
+                  coordinationFindings.push({
+                    check: 'spec_mismatch',
+                    tier: 'warn',
+                    summary: `${result.staleSpecs.length} spec file(s) updated after branch cut`,
+                    details,
+                    blocking: false,
+                  });
+                  core.info(`[WARN] Spec Mismatch: ${result.staleSpecs.length} stale spec(s)`);
+                } else {
+                  core.info('[PASS] Spec Mismatch: All specs current');
+                }
+              } catch (err) {
+                core.warning(`Spec mismatch check failed: ${err}`);
+              }
+            })()
+          );
+        }
+      }
+
+      // S040: Ownership Collision (WARN)
+      if (config.coordination.ownershipCollision && changedFiles.length > 0) {
+        coordinationPromises.push(
+          (async () => {
+            try {
+              const result: OwnershipCollisionResult = detectOwnershipCollisions({
+                branchName: headBranch,
+                changedFiles,
+              });
+              if (result.hasCollisions) {
+                const details = formatOwnershipCollisionWarning(result);
+                coordinationFindings.push({
+                  check: 'ownership_collision',
+                  tier: 'warn',
+                  summary: `${result.branchDomain} branch touching ${result.collisions.length} cross-domain file(s)`,
+                  details,
+                  blocking: false,
+                });
+                core.info(`[WARN] Ownership Collision: ${result.collisions.length} cross-domain files`);
+              } else if (result.branchDomain) {
+                core.info(`[PASS] Ownership Collision: All files within ${result.branchDomain} domain`);
+              } else {
+                core.info('[SKIP] Ownership Collision: Unrecognized branch prefix');
+              }
+            } catch (err) {
+              core.warning(`Ownership collision check failed: ${err}`);
+            }
+          })()
+        );
+      }
+
+      // S041: Dependency Enforcement (BLOCK)
+      if (config.coordination.dependencyEnforcement) {
+        coordinationPromises.push(
+          (async () => {
+            try {
+              // Try to read SPRINT.md from .claude/work/SPRINT.md
+              let sprintMdContent = '';
+              const sprintMdPath = `${cwd}/.claude/work/SPRINT.md`;
+              try {
+                if (fs.existsSync(sprintMdPath)) {
+                  sprintMdContent = fs.readFileSync(sprintMdPath, 'utf-8');
+                }
+              } catch {
+                // SPRINT.md not found, skip
+              }
+
+              if (sprintMdContent) {
+                const result: DependencyEnforcementResult = await enforceDependencies({
+                  octokit,
+                  owner,
+                  repo,
+                  headBranch,
+                  baseBranch,
+                  sprintMdContent,
+                });
+                if (result.hasUnmetDependencies) {
+                  const details = formatDependencyBlock(result);
+                  coordinationFindings.push({
+                    check: 'dependency_enforcement',
+                    tier: 'block',
+                    summary: `${result.unmetDependencies.length} unmet story dependencies`,
+                    details,
+                    blocking: true,
+                  });
+                  hasCoordinationBlock = true;
+                  core.info(`[BLOCK] Dependencies: ${result.unmetDependencies.length} unmet`);
+                } else if (result.allDependencies.length > 0) {
+                  core.info(`[PASS] Dependencies: All ${result.allDependencies.length} satisfied`);
+                } else {
+                  core.info('[PASS] Dependencies: No dependencies declared');
+                }
+              } else {
+                core.info('[SKIP] Dependencies: No SPRINT.md found');
+              }
+            } catch (err) {
+              core.warning(`Dependency enforcement check failed: ${err}`);
+            }
+          })()
+        );
+      }
+
+      // S042: Session Handoff (WARN, opt-in) - runs on merge, not on PR check
+      // This is typically run on merge, but we can note if handoffs would be generated
+      if (config.coordination.sessionHandoff && changedFiles.length > 0) {
+        // Note: This check is informational during PR review
+        const prUser = pr?.['user'] as Record<string, unknown> | undefined;
+        const result: HandoffResult = generateHandoffNotifications({
+          prNumber,
+          prTitle: (pr?.['title'] as string) || '',
+          prUrl: (pr?.['html_url'] as string) || '',
+          authorLogin: (prUser?.['login'] as string) || 'unknown',
+          headBranch,
+          baseBranch,
+          changedFiles,
+          labels: ((pr?.['labels'] || []) as Array<{name: string}>).map((l) => l.name),
+          date: new Date().toISOString(),
+        });
+        if (result.hasHandoffs) {
+          coordinationFindings.push({
+            check: 'session_handoff',
+            tier: 'inform',
+            summary: `${result.notifications.length} handoff notification(s) will be generated on merge`,
+            details: `This PR will generate handoff notifications to: ${result.notifications.map((n) => n.recipient).join(', ')}`,
+            blocking: false,
+          });
+          core.info(`[INFO] Handoffs: ${result.notifications.length} will be generated on merge`);
+        }
+      }
+
+      // S043: Test Count Regression (WARN)
+      if (config.coordination.testCountRegression && changedFiles.some((f) => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(f))) {
+        coordinationPromises.push(
+          (async () => {
+            try {
+              const result: TestCountRegressionResult = await detectTestCountRegression({
+                octokit: octokit as unknown as import('./coordination').TestCountOctokitLike,
+                owner,
+                repo,
+                headBranch,
+                baseBranch,
+                changedFiles,
+              });
+              if (result.hasRegression) {
+                const details = formatTestCountRegressionWarning(result);
+                coordinationFindings.push({
+                  check: 'test_count_regression',
+                  tier: 'warn',
+                  summary: `Test count decreased: ${result.baseCount} -> ${result.branchCount}`,
+                  details,
+                  blocking: false,
+                });
+                core.info(`[WARN] Test Regression: ${result.delta} tests`);
+              } else {
+                core.info(`[PASS] Test Count: ${result.branchCount} tests (${result.delta >= 0 ? '+' : ''}${result.delta})`);
+              }
+            } catch (err) {
+              core.warning(`Test count regression check failed: ${err}`);
+            }
+          })()
+        );
+      }
+
+      // S045: Authorship Attribution (INFORM, opt-in)
+      if (config.coordination.authorshipAttribution) {
+        coordinationPromises.push(
+          (async () => {
+            try {
+              const result: AuthorshipResult = await detectMixedAuthorship({
+                octokit: octokit as unknown as import('./coordination').AuthorshipOctokitLike,
+                owner,
+                repo,
+                prNumber,
+              });
+              if (result.hasMixedAuthors) {
+                const details = formatAuthorshipAttribution(result);
+                coordinationFindings.push({
+                  check: 'authorship_attribution',
+                  tier: 'inform',
+                  summary: `${result.authors.length} contributors across ${result.totalCommits} commit(s)`,
+                  details,
+                  blocking: false,
+                });
+                core.info(`[INFO] Authorship: ${result.authors.length} authors`);
+              } else {
+                core.info(`[PASS] Authorship: Single author @${result.primaryAuthor}`);
+              }
+            } catch (err) {
+              core.warning(`Authorship attribution check failed: ${err}`);
+            }
+          })()
+        );
+      }
+
+      // Wait for all checks to complete
+      await Promise.all(coordinationPromises);
+
+      // Log summary
+      const blockCount = coordinationFindings.filter((f) => f.tier === 'block').length;
+      const warnCount = coordinationFindings.filter((f) => f.tier === 'warn').length;
+      const infoCount = coordinationFindings.filter((f) => f.tier === 'inform').length;
+      core.info(`Coordination Summary: ${blockCount} block, ${warnCount} warn, ${infoCount} info`);
+
+      core.endGroup();
+    } else if (!config.coordination.enabled) {
+      core.info('Coordination checks disabled');
+    } else if (!prNumber) {
+      core.info('Not in PR context — skipping coordination checks');
+    }
+
+    // Set outputs - include coordination blocks
+    const overallStatus = (hasBlockingFailure || hasCoordinationBlock) ? 'fail' : 'pass';
 
     // S104: Generate and post PR comment
     core.startGroup('Generating PR Comment');
@@ -616,7 +1056,6 @@ async function run(): Promise<void> {
     );
 
     // Build report data
-    const context = github.context;
     const reportData: ReportData = {
       overallStatus,
       gates: gateSummaries,
@@ -637,6 +1076,7 @@ async function run(): Promise<void> {
       workflowUrl: `${context.serverUrl || 'https://github.com'}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId || process.env['GITHUB_RUN_ID'] || '0'}`,
       repository: `${context.repo.owner}/${context.repo.repo}`,
       prNumber: context.payload.pull_request?.number,
+      ...(coordinationFindings.length > 0 ? { coordinationFindings } : {}),
     };
 
     // S085: Log warning for high suppression count
@@ -682,9 +1122,17 @@ async function run(): Promise<void> {
     core.info(`Overall Status: ${overallStatus.toUpperCase()}`);
     core.info('='.repeat(50));
 
-    // Fail the action if any blocking gate failed
-    if (hasBlockingFailure) {
-      core.setFailed(`Hawky found blocking violations`);
+    // Fail the action if any blocking gate or coordination check failed
+    if (hasBlockingFailure || hasCoordinationBlock) {
+      const reasons: string[] = [];
+      if (hasBlockingFailure) {
+        reasons.push('blocking gate violations');
+      }
+      if (hasCoordinationBlock) {
+        const blockChecks = coordinationFindings.filter((f) => f.tier === 'block').map((f) => f.check);
+        reasons.push(`coordination blocks (${blockChecks.join(', ')})`);
+      }
+      core.setFailed(`Hawky found: ${reasons.join(' and ')}`);
     } else {
       core.info('Hawky completed successfully');
     }

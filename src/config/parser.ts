@@ -11,14 +11,17 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import * as core from '@actions/core';
 
-import { createDefaultConfig, GATE_DEFAULTS } from './defaults';
+import { COORDINATION_DEFAULTS, createDefaultConfig, GATE_DEFAULTS, VISUAL_DEFAULTS } from './defaults';
 import type {
   ConfigParseResult,
   ConfigValidationError,
+  CoordinationConfig,
   GateConfig,
   GateName,
   GracePeriodConfig,
   RawHawkyConfig,
+  ViewportConfig,
+  VisualConfig,
 } from './types';
 import { GATE_NAMES } from './types';
 
@@ -140,6 +143,104 @@ function parseGateConfig(
 }
 
 /**
+ * Parse visual testing configuration from raw YAML
+ *
+ * S070: Threshold Config
+ */
+function parseVisualConfig(
+  raw: RawHawkyConfig['visual'],
+  warnings: ConfigValidationError[]
+): VisualConfig {
+  const config: VisualConfig = { ...VISUAL_DEFAULTS };
+
+  if (!raw) {
+    return config;
+  }
+
+  // Parse enabled flag
+  if (raw.enabled !== undefined) {
+    config.enabled = toBoolean(raw.enabled, config.enabled ?? false);
+  }
+
+  // Parse threshold (0-100 range)
+  if (raw.threshold !== undefined) {
+    const threshold = typeof raw.threshold === 'string' ? parseFloat(raw.threshold) : raw.threshold;
+    if (typeof threshold === 'number' && !isNaN(threshold)) {
+      if (threshold < 0 || threshold > 100) {
+        warnings.push({
+          field: 'visual.threshold',
+          message: 'Threshold must be between 0 and 100, using default (0.1)',
+          value: raw.threshold,
+        });
+      } else {
+        config.threshold = threshold;
+      }
+    }
+  }
+
+  // Parse viewports
+  if (raw.viewports && Array.isArray(raw.viewports)) {
+    const parsedViewports: ViewportConfig[] = [];
+
+    for (const vp of raw.viewports) {
+      if (vp && typeof vp === 'object') {
+        const width = toNumber(vp.width, 0);
+        const height = toNumber(vp.height, 0);
+
+        if (width > 0 && height > 0) {
+          const viewport: ViewportConfig = { width, height };
+          if (vp.name && typeof vp.name === 'string') {
+            viewport.name = vp.name;
+          }
+          parsedViewports.push(viewport);
+        } else {
+          warnings.push({
+            field: 'visual.viewports',
+            message: 'Viewport must have positive width and height',
+            value: vp,
+          });
+        }
+      }
+    }
+
+    if (parsedViewports.length > 0) {
+      config.viewports = parsedViewports;
+    }
+  }
+
+  // Parse routes
+  if (raw.routes && Array.isArray(raw.routes)) {
+    config.routes = raw.routes.filter(
+      (r): r is string => typeof r === 'string' && r.trim().length > 0
+    );
+  }
+
+  // Parse waitFor
+  if (raw.wait_for) {
+    const waitFor = toString(raw.wait_for);
+    if (waitFor) {
+      config.waitFor = waitFor;
+    }
+  }
+
+  // Parse timeout
+  if (raw.timeout !== undefined) {
+    const timeout = toNumber(raw.timeout, config.timeout ?? 30000);
+    if (timeout > 0) {
+      config.timeout = timeout;
+    } else {
+      warnings.push({
+        field: 'visual.timeout',
+        message: 'Timeout must be positive, using default (30000)',
+        value: raw.timeout,
+      });
+    }
+  }
+
+  return config;
+}
+
+/**
  * Parse grace period configuration from raw YAML
  */
 function parseGracePeriod(
@@ -198,6 +299,69 @@ function parseGracePeriod(
     const todayParts = new Date().toISOString().split('T');
     const today = todayParts[0] ?? '';
     config.active = today <= endDate;
+  }
+
+  return config;
+}
+
+/**
+ * Parse coordination configuration from raw YAML
+ *
+ * S096: Coordination Integration
+ */
+function parseCoordinationConfig(
+  raw: RawHawkyConfig['coordination'],
+  _warnings: ConfigValidationError[]
+): CoordinationConfig {
+  const config: CoordinationConfig = { ...COORDINATION_DEFAULTS };
+
+  if (!raw) {
+    return config;
+  }
+
+  // Parse master toggle
+  if (raw.enabled !== undefined) {
+    config.enabled = toBoolean(raw.enabled, config.enabled);
+  }
+
+  // Parse individual check toggles
+  if (raw.concurrent_prs !== undefined) {
+    config.concurrentPrs = toBoolean(raw.concurrent_prs, config.concurrentPrs);
+  }
+  if (raw.contract_divergence !== undefined) {
+    config.contractDivergence = toBoolean(raw.contract_divergence, config.contractDivergence);
+  }
+  if (raw.parallel_migrations !== undefined) {
+    config.parallelMigrations = toBoolean(raw.parallel_migrations, config.parallelMigrations);
+  }
+  if (raw.stale_branch !== undefined) {
+    config.staleBranch = toBoolean(raw.stale_branch, config.staleBranch);
+  }
+  if (raw.spec_mismatch !== undefined) {
+    config.specMismatch = toBoolean(raw.spec_mismatch, config.specMismatch);
+  }
+  if (raw.ownership_collision !== undefined) {
+    config.ownershipCollision = toBoolean(raw.ownership_collision, config.ownershipCollision);
+  }
+  if (raw.dependency_enforcement !== undefined) {
+    config.dependencyEnforcement = toBoolean(raw.dependency_enforcement, config.dependencyEnforcement);
+  }
+  if (raw.session_handoff !== undefined) {
+    config.sessionHandoff = toBoolean(raw.session_handoff, config.sessionHandoff);
+  }
+  if (raw.test_count_regression !== undefined) {
+    config.testCountRegression = toBoolean(raw.test_count_regression, config.testCountRegression);
+  }
+  if (raw.authorship_attribution !== undefined) {
+    config.authorshipAttribution = toBoolean(raw.authorship_attribution, config.authorshipAttribution);
+  }
+
+  // Parse thresholds
+  if (raw.stale_branch_commits !== undefined) {
+    config.staleBranchCommits = toNumber(raw.stale_branch_commits, config.staleBranchCommits);
+  }
+  if (raw.stale_branch_days !== undefined) {
+    config.staleBranchDays = toNumber(raw.stale_branch_days, config.staleBranchDays);
   }
 
   return config;
@@ -307,6 +471,12 @@ export function loadConfig(basePath: string, configPath?: string): ConfigParseRe
 
   // Parse grace period
   config.gracePeriod = parseGracePeriod(rawConfig.grace_period, warnings);
+
+  // Parse visual config
+  config.visual = parseVisualConfig(rawConfig.visual, warnings);
+
+  // Parse coordination config
+  config.coordination = parseCoordinationConfig(rawConfig.coordination, warnings);
 
   return {
     config,

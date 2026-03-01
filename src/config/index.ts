@@ -8,6 +8,7 @@
 export type {
   ConfigParseResult,
   ConfigValidationError,
+  CoordinationConfig,
   GateConfig,
   GateName,
   GracePeriodConfig,
@@ -20,6 +21,7 @@ export { GATE_NAMES } from './types';
 // Defaults
 export {
   BUILD_GATE_DEFAULTS,
+  COORDINATION_DEFAULTS,
   createDefaultConfig,
   DEFAULT_CONFIG,
   ESLINT_GATE_DEFAULTS,
