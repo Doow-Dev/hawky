@@ -82,3 +82,19 @@ export {
   detectParallelMigrations,
   formatSchemaMigrationBlock,
 } from './schema-migration';
+
+export {
+  // Types
+  type StaleSpec,
+  type SpecMismatchResult,
+  type SpecMismatchOptions,
+  type SpecMismatchOctokitLike,
+  // Constants
+  DEFAULT_SPEC_PATTERNS,
+  // Functions
+  isSpecFile,
+  findBranchCutPoint,
+  checkSpecStaleness,
+  detectSpecMismatch,
+  formatSpecMismatchWarning,
+} from './spec-version-mismatch';
