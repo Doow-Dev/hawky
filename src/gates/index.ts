@@ -64,3 +64,12 @@ export {
   scanForFontSizeViolations,
   violationToAnnotation as designSystemViolationToAnnotation,
 } from './design-system';
+
+// Frontend Checks Gate
+export {
+  frontendChecksGate,
+  scanForUnhandledAsyncState,
+  scanForMissingKeys,
+  scanForMissingDependencies,
+  violationToAnnotation as frontendChecksViolationToAnnotation,
+} from './frontend-checks';

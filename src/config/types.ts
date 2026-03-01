@@ -16,7 +16,8 @@ export type GateName =
   | 'semgrep'
   | 'gitleaks'
   | 'npm-audit'
-  | 'design-system';
+  | 'design-system'
+  | 'frontend-checks';
 
 /**
  * All valid gate names
@@ -30,6 +31,7 @@ export const GATE_NAMES: GateName[] = [
   'gitleaks',
   'npm-audit',
   'design-system',
+  'frontend-checks',
 ];
 
 /**
