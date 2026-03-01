@@ -104,3 +104,24 @@ export {
   applyOpenedStatus,
   applyMergedStatus,
 } from './pr-status';
+
+export {
+  // Types
+  type ReviewEvent,
+  type ProtocolSequenceResult,
+  type ProtocolSequenceOptions,
+  type ProtocolOctokitLike,
+  // Constants
+  DEFAULT_HAWK_LOGINS,
+  DEFAULT_PM_LOGINS,
+  DEFAULT_LGTM_KEYWORDS,
+  DEFAULT_CONFIRM_KEYWORDS,
+  // Functions
+  isLgtmComment,
+  isPMConfirmation,
+  findHawkApproval,
+  findPMConfirmation,
+  checkProtocolSequence,
+  fetchAndCheckProtocol,
+  formatProtocolSequenceInfo,
+} from './protocol-sequence';
