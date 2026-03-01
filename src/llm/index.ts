@@ -25,3 +25,28 @@ export {
   DEFAULT_CONFIGS,
   TOKEN_COSTS,
 } from './provider';
+
+export {
+  // Types
+  type DiffHunk,
+  type ChangedFile,
+  type PRDiff,
+  type FileContent,
+  type ReviewContext,
+  type ContextOptions,
+  // Functions
+  estimateTokens,
+  estimateFileTokens,
+  parseDiff,
+  createPRDiff,
+  loadFileContent,
+  loadFileContents,
+  prioritizeFiles,
+  summarizeSpec,
+  extractConventions,
+  assembleContext,
+  formatDiffForLLM,
+  formatViolationsForLLM,
+  formatFileContentsForLLM,
+  formatContextAsPrompt,
+} from './context';
