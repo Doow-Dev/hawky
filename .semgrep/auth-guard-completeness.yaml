@@ -1,0 +1,202 @@
+rules:
+  # Express.js routes without auth middleware
+  - id: hawky.security.express-route-no-auth
+    message: |
+      Express route handler without authentication middleware.
+      Add an auth middleware before the handler: router.get('/path', authenticate, handler)
+      Or use a route-level guard: router.use('/protected', authenticate)
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-306: Missing Authentication for Critical Function"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          # Direct route handlers without auth middleware
+          - pattern: router.get($PATH, $HANDLER)
+          - pattern: router.post($PATH, $HANDLER)
+          - pattern: router.put($PATH, $HANDLER)
+          - pattern: router.patch($PATH, $HANDLER)
+          - pattern: router.delete($PATH, $HANDLER)
+          - pattern: app.get($PATH, $HANDLER)
+          - pattern: app.post($PATH, $HANDLER)
+          - pattern: app.put($PATH, $HANDLER)
+          - pattern: app.patch($PATH, $HANDLER)
+          - pattern: app.delete($PATH, $HANDLER)
+      - metavariable-pattern:
+          metavariable: $HANDLER
+          patterns:
+            # Handler is a direct function, not a middleware chain
+            - pattern-not: $AUTH, ...
+            - pattern-not: [..., $AUTH, ...]
+      - metavariable-pattern:
+          metavariable: $PATH
+          patterns:
+            # Exclude health check and public endpoints
+            - pattern-not: "/health"
+            - pattern-not: "/healthz"
+            - pattern-not: "/ready"
+            - pattern-not: "/readiness"
+            - pattern-not: "/ping"
+            - pattern-not: "/version"
+            - pattern-not: "/public/..."
+            - pattern-not: "/api/public/..."
+    paths:
+      include:
+        - "**/routes/**"
+        - "**/router/**"
+        - "**/api/**"
+        - "**/*route*"
+        - "**/*router*"
+        - "**/*api*"
+
+  # Fastify routes without preHandler auth
+  - id: hawky.security.fastify-route-no-auth
+    message: |
+      Fastify route without preHandler authentication.
+      Add a preHandler hook: { preHandler: authenticate, handler: yourHandler }
+      Or register a route-level hook: fastify.addHook('preHandler', authenticate)
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-306: Missing Authentication for Critical Function"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: |
+              fastify.get($PATH, { handler: $HANDLER })
+          - pattern: |
+              fastify.post($PATH, { handler: $HANDLER })
+          - pattern: |
+              fastify.put($PATH, { handler: $HANDLER })
+          - pattern: |
+              fastify.patch($PATH, { handler: $HANDLER })
+          - pattern: |
+              fastify.delete($PATH, { handler: $HANDLER })
+      - pattern-not: |
+          fastify.$METHOD($PATH, { ..., preHandler: ..., ... })
+    paths:
+      include:
+        - "**/routes/**"
+        - "**/api/**"
+        - "**/*route*"
+
+  # NestJS controllers without @UseGuards
+  - id: hawky.security.nestjs-controller-no-guard
+    message: |
+      NestJS controller or route handler without @UseGuards decorator.
+      Add @UseGuards(AuthGuard) to the controller or individual methods.
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-306: Missing Authentication for Critical Function"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: |
+              @Controller(...)
+              class $CLASS {
+                @Get(...)
+                $METHOD(...) { ... }
+              }
+          - pattern: |
+              @Controller(...)
+              class $CLASS {
+                @Post(...)
+                $METHOD(...) { ... }
+              }
+          - pattern: |
+              @Controller(...)
+              class $CLASS {
+                @Put(...)
+                $METHOD(...) { ... }
+              }
+          - pattern: |
+              @Controller(...)
+              class $CLASS {
+                @Delete(...)
+                $METHOD(...) { ... }
+              }
+      - pattern-not: |
+          @Controller(...)
+          @UseGuards(...)
+          class $CLASS { ... }
+      - pattern-not: |
+          @Controller(...)
+          class $CLASS {
+            @UseGuards(...)
+            @$DECORATOR(...)
+            $METHOD(...) { ... }
+          }
+    paths:
+      include:
+        - "**/*controller*"
+        - "**/controllers/**"
+
+  # Koa routes without auth middleware
+  - id: hawky.security.koa-route-no-auth
+    message: |
+      Koa route without authentication middleware.
+      Add auth middleware before the handler: router.get('/path', auth, handler)
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-306: Missing Authentication for Critical Function"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: router.get($PATH, $HANDLER)
+          - pattern: router.post($PATH, $HANDLER)
+          - pattern: router.put($PATH, $HANDLER)
+          - pattern: router.delete($PATH, $HANDLER)
+      - metavariable-pattern:
+          metavariable: $HANDLER
+          patterns:
+            - pattern-not: $AUTH, ...
+    paths:
+      include:
+        - "**/routes/**"
+        - "**/*route*"
+
+  # Hono routes without middleware
+  - id: hawky.security.hono-route-no-auth
+    message: |
+      Hono route without authentication middleware.
+      Add auth middleware: app.use('/api/*', authMiddleware)
+      Or: app.get('/path', authMiddleware, handler)
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-306: Missing Authentication for Critical Function"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: app.get($PATH, $HANDLER)
+          - pattern: app.post($PATH, $HANDLER)
+          - pattern: app.put($PATH, $HANDLER)
+          - pattern: app.delete($PATH, $HANDLER)
+      - metavariable-pattern:
+          metavariable: $HANDLER
+          patterns:
+            - pattern-not: $AUTH, ...
+            - pattern-not: (...) => { ... }
+    paths:
+      include:
+        - "**/routes/**"
+        - "**/*route*"
+        - "**/api/**"
