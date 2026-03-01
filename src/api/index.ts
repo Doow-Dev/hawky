@@ -106,3 +106,17 @@ export {
   checkContractsIntegration,
   formatDriftReport,
 } from './contracts-integration';
+
+export {
+  // Types
+  type BreakingChangeKind,
+  type ChangeSeverity,
+  type SpecChange,
+  type BreakingChangeResult,
+  type CompareOptions,
+  // Functions
+  compareSpecs,
+  detectBreakingChanges,
+  checkBreakingChanges,
+  formatBreakingChangesReport,
+} from './breaking-changes';
