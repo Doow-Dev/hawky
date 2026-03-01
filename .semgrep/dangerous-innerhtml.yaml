@@ -1,0 +1,68 @@
+rules:
+  - id: hawky.security.dangerous-innerhtml-variable
+    message: |
+      dangerouslySetInnerHTML with variable data is an XSS vulnerability.
+      User-controlled content can execute arbitrary JavaScript.
+      Sanitize the HTML first: dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }}
+    severity: ERROR
+    languages: [javascript, typescript, tsx, jsx]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-79: Cross-site Scripting (XSS)"
+      owasp: "A03:2021 - Injection"
+      hawky-rule: true
+    patterns:
+      - pattern: "dangerouslySetInnerHTML={{ __html: $VAR }}"
+      - pattern-not: "dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(...) }}"
+      - pattern-not: "dangerouslySetInnerHTML={{ __html: sanitize(...) }}"
+      - pattern-not: "dangerouslySetInnerHTML={{ __html: sanitizeHtml(...) }}"
+      - pattern-not: "dangerouslySetInnerHTML={{ __html: xss(...) }}"
+      - pattern-not: "dangerouslySetInnerHTML={{ __html: purify(...) }}"
+      - metavariable-pattern:
+          metavariable: $VAR
+          patterns:
+            - pattern-not: "\"...\""
+
+  - id: hawky.security.dangerous-innerhtml-user-input
+    message: |
+      dangerouslySetInnerHTML with user input (props, state, params) is dangerous.
+      This can lead to XSS attacks. Always sanitize user content with DOMPurify.
+    severity: ERROR
+    languages: [javascript, typescript, tsx, jsx]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-79: Cross-site Scripting (XSS)"
+      owasp: "A03:2021 - Injection"
+      hawky-rule: true
+    pattern-either:
+      - pattern: "dangerouslySetInnerHTML={{ __html: props.$PROP }}"
+      - pattern: "dangerouslySetInnerHTML={{ __html: this.props.$PROP }}"
+      - pattern: "dangerouslySetInnerHTML={{ __html: state.$PROP }}"
+      - pattern: "dangerouslySetInnerHTML={{ __html: this.state.$PROP }}"
+      - pattern: "dangerouslySetInnerHTML={{ __html: params.$PROP }}"
+      - pattern: "dangerouslySetInnerHTML={{ __html: query.$PROP }}"
+      - pattern: "dangerouslySetInnerHTML={{ __html: body.$PROP }}"
+      - pattern: "dangerouslySetInnerHTML={{ __html: req.body.$PROP }}"
+
+  - id: hawky.security.dangerous-innerhtml-fetch-data
+    message: |
+      dangerouslySetInnerHTML with fetched/external data is dangerous.
+      External data should always be sanitized before rendering as HTML.
+      Use: dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(data.html) }}
+    severity: ERROR
+    languages: [javascript, typescript, tsx, jsx]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-79: Cross-site Scripting (XSS)"
+      owasp: "A03:2021 - Injection"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: "dangerouslySetInnerHTML={{ __html: data.$PROP }}"
+          - pattern: "dangerouslySetInnerHTML={{ __html: response.$PROP }}"
+          - pattern: "dangerouslySetInnerHTML={{ __html: result.$PROP }}"
+          - pattern: "dangerouslySetInnerHTML={{ __html: apiData.$PROP }}"
+      - pattern-not: "dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(...) }}"
