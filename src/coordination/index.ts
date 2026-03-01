@@ -35,3 +35,22 @@ export {
   checkStaleBranch,
   formatStaleBranchWarning,
 } from './stale-branch';
+
+export {
+  // Types
+  type TestCountSnapshot,
+  type TestCountRegressionResult,
+  type TestCountRegressionOptions,
+  type TestCountOctokitLike,
+  // Constants
+  TEST_FILE_PATTERNS,
+  TEST_CASE_PATTERNS,
+  // Functions
+  isTestFile,
+  countTestCasesInContent,
+  decodeBase64Content,
+  getTestFilesInBranch,
+  countTestsInBranch,
+  detectTestCountRegression,
+  formatTestCountRegressionWarning,
+} from './test-count-regression';
