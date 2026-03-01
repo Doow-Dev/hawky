@@ -97,3 +97,13 @@ export {
   buildComplianceCommentBody,
   formatChangeRequestsAsMarkdown,
 } from './change-requests';
+
+export {
+  // Types
+  type FixSuggestion,
+  type AutoFixResult,
+  type AutoFixOptions,
+  // Functions
+  generateAutoFixes,
+  formatAutoFixesAsMarkdown,
+} from './auto-fix';
