@@ -98,3 +98,19 @@ export {
   detectSpecMismatch,
   formatSpecMismatchWarning,
 } from './spec-version-mismatch';
+
+export {
+  // Types
+  type TeamDomain,
+  type OwnershipCollision,
+  type OwnershipCollisionResult,
+  type OwnershipCollisionOptions,
+  // Constants
+  DEFAULT_DOMAINS,
+  // Functions
+  identifyBranchDomain,
+  identifyFileDomain,
+  detectFileCollision,
+  detectOwnershipCollisions,
+  formatOwnershipCollisionWarning,
+} from './ownership-collision';
