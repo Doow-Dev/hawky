@@ -6,6 +6,7 @@ import {
   LLMClient,
   CostTracker,
   createLLMClient,
+  createAriaTasksClient,
   createKimiClient,
   createOpenAIClient,
   createAnthropicClient,
@@ -114,6 +115,25 @@ describe('LLM Provider', () => {
 
       expect(client).toBeDefined();
     });
+
+    it('should create ARIA Tasks client (Azure-hosted Kimi)', () => {
+      const client = createAriaTasksClient(
+        'test-key',
+        'https://test.openai.azure.com'
+      );
+
+      expect(client).toBeDefined();
+    });
+
+    it('should default to aria-tasks provider', () => {
+      // aria-tasks is the primary provider for Hawky
+      const client = createLLMClient({
+        apiKey: 'test-key',
+        endpoint: 'https://test.openai.azure.com',
+      });
+
+      expect(client).toBeDefined();
+    });
   });
 
   // ============================================================================
@@ -209,6 +229,33 @@ describe('LLM Provider', () => {
       expect(config?.model).toBe(DEFAULT_CONFIGS.kimi.model);
       expect(config?.temperature).toBe(DEFAULT_CONFIGS.kimi.temperature);
     });
+
+    it('should load ARIA Tasks config from AZURE_AI_FOUNDRY_* env vars', () => {
+      process.env.AZURE_AI_FOUNDRY_KEY = 'azure-key';
+      process.env.AZURE_AI_FOUNDRY_ENDPOINT = 'https://test.openai.azure.com';
+
+      const config = loadLLMConfig({
+        llm: {
+          provider: 'aria-tasks',
+        },
+      });
+
+      expect(config).not.toBeNull();
+      expect(config?.provider).toBe('aria-tasks');
+      expect(config?.apiKey).toBe('azure-key');
+      expect(config?.endpoint).toBe('https://test.openai.azure.com');
+      expect(config?.model).toBe('kimi-2.5');
+    });
+
+    it('should default to aria-tasks provider when no provider specified', () => {
+      process.env.AZURE_AI_FOUNDRY_KEY = 'azure-key';
+      process.env.AZURE_AI_FOUNDRY_ENDPOINT = 'https://test.openai.azure.com';
+
+      const config = loadLLMConfig({});
+
+      expect(config).not.toBeNull();
+      expect(config?.provider).toBe('aria-tasks');
+    });
   });
 
   // ============================================================================
@@ -217,18 +264,24 @@ describe('LLM Provider', () => {
 
   describe('Constants', () => {
     it('should have configs for all providers', () => {
+      expect(DEFAULT_CONFIGS['aria-tasks']).toBeDefined();
       expect(DEFAULT_CONFIGS.kimi).toBeDefined();
       expect(DEFAULT_CONFIGS.openai).toBeDefined();
       expect(DEFAULT_CONFIGS.anthropic).toBeDefined();
     });
 
+    it('should have kimi-2.5 as default model for aria-tasks', () => {
+      expect(DEFAULT_CONFIGS['aria-tasks'].model).toBe('kimi-2.5');
+    });
+
     it('should have token costs for all providers', () => {
+      expect(TOKEN_COSTS['aria-tasks']).toBeDefined();
       expect(TOKEN_COSTS.kimi).toBeDefined();
       expect(TOKEN_COSTS.openai).toBeDefined();
       expect(TOKEN_COSTS.anthropic).toBeDefined();
 
       // Each should have input and output costs
-      for (const provider of ['kimi', 'openai', 'anthropic'] as const) {
+      for (const provider of ['aria-tasks', 'kimi', 'openai', 'anthropic'] as const) {
         expect(TOKEN_COSTS[provider].input).toBeGreaterThan(0);
         expect(TOKEN_COSTS[provider].output).toBeGreaterThan(0);
       }
@@ -411,6 +464,33 @@ describe('LLM Provider', () => {
       expect(summary.totalInputTokens).toBe(1000);
       expect(summary.totalOutputTokens).toBe(500);
       expect(summary.totalCost).toBeGreaterThan(0);
+    });
+
+    it('should make request to ARIA Tasks endpoint', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'Hello from Azure Kimi!' } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+      } as Response);
+
+      const client = createAriaTasksClient(
+        'azure-key',
+        'https://test.openai.azure.com'
+      );
+      const messages: ChatMessage[] = [
+        { role: 'user', content: 'Say hello' },
+      ];
+
+      const response = await client.chat(messages);
+
+      expect(response.content).toBe('Hello from Azure Kimi!');
+      expect(response.provider).toBe('aria-tasks');
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://test.openai.azure.com/v1/chat/completions',
+        expect.any(Object)
+      );
     });
   });
 });

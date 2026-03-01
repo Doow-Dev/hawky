@@ -1,8 +1,12 @@
 /**
  * LLM Provider Integration
  *
- * Multi-provider LLM client with Kimi as the primary provider.
+ * Multi-provider LLM client with ARIA Tasks (Azure-hosted Kimi) as primary.
  * Supports OpenAI and Anthropic as fallbacks.
+ *
+ * ARIA Tasks is the Azure AI Foundry-hosted Kimi deployment used for
+ * automated tasks like code review. It uses the OpenAI-compatible API
+ * with Azure authentication.
  *
  * Features:
  * - Rate limiting with token bucket
@@ -12,8 +16,13 @@
  */
 /**
  * Supported LLM providers
+ *
+ * - aria-tasks: Azure-hosted Kimi (ARIA Tasks) - primary provider
+ * - kimi: Public Moonshot API (fallback)
+ * - openai: OpenAI API
+ * - anthropic: Anthropic API
  */
-export type LLMProvider = 'kimi' | 'openai' | 'anthropic';
+export type LLMProvider = 'aria-tasks' | 'kimi' | 'openai' | 'anthropic';
 /**
  * Chat message format (OpenAI-compatible)
  */
@@ -29,6 +38,8 @@ export interface LLMConfig {
     provider: LLMProvider;
     /** API key (usually from environment variable) */
     apiKey: string;
+    /** Custom endpoint URL (required for aria-tasks, optional for others) */
+    endpoint?: string | undefined;
     /** Model name */
     model: string;
     /** Temperature (0-1, lower = more deterministic) */
@@ -166,7 +177,16 @@ export declare function createLLMClient(config: Partial<LLMConfig> & {
     apiKey: string;
 }): LLMClient;
 /**
- * Create a Kimi client
+ * Create an ARIA Tasks client (Azure-hosted Kimi)
+ *
+ * This is the primary provider for Hawky code review.
+ * Uses AZURE_AI_FOUNDRY_ENDPOINT (GitHub Actions) or ARIA_TASKS_ENDPOINT (local dev).
+ */
+export declare function createAriaTasksClient(apiKey: string, endpoint?: string, config?: Partial<LLMConfig>): LLMClient;
+/**
+ * Create a Kimi client (public Moonshot API)
+ *
+ * Fallback when ARIA Tasks is not available.
  */
 export declare function createKimiClient(apiKey: string, config?: Partial<LLMConfig>): LLMClient;
 /**
@@ -184,6 +204,7 @@ export declare function loadLLMConfig(hawkyConfig?: {
     llm?: {
         provider?: LLMProvider;
         api_key?: string;
+        endpoint?: string;
         model?: string;
         temperature?: number;
         max_tokens?: number;

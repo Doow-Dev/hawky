@@ -1,7 +1,9 @@
 /**
  * LLM Module
  *
- * AI-powered code review using LLMs (Kimi primary, OpenAI/Anthropic fallback).
+ * AI-powered code review using LLMs.
+ * Primary provider: ARIA Tasks (Azure-hosted Kimi via Azure AI Foundry)
+ * Fallbacks: Kimi (public API), OpenAI, Anthropic
  */
 
 export {
@@ -17,6 +19,7 @@ export {
   CostTracker,
   // Factory functions
   createLLMClient,
+  createAriaTasksClient,
   createKimiClient,
   createOpenAIClient,
   createAnthropicClient,

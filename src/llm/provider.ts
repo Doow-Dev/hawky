@@ -1,8 +1,12 @@
 /**
  * LLM Provider Integration
  *
- * Multi-provider LLM client with Kimi as the primary provider.
+ * Multi-provider LLM client with ARIA Tasks (Azure-hosted Kimi) as primary.
  * Supports OpenAI and Anthropic as fallbacks.
+ *
+ * ARIA Tasks is the Azure AI Foundry-hosted Kimi deployment used for
+ * automated tasks like code review. It uses the OpenAI-compatible API
+ * with Azure authentication.
  *
  * Features:
  * - Rate limiting with token bucket
@@ -17,8 +21,13 @@
 
 /**
  * Supported LLM providers
+ *
+ * - aria-tasks: Azure-hosted Kimi (ARIA Tasks) - primary provider
+ * - kimi: Public Moonshot API (fallback)
+ * - openai: OpenAI API
+ * - anthropic: Anthropic API
  */
-export type LLMProvider = 'kimi' | 'openai' | 'anthropic';
+export type LLMProvider = 'aria-tasks' | 'kimi' | 'openai' | 'anthropic';
 
 /**
  * Chat message format (OpenAI-compatible)
@@ -37,6 +46,9 @@ export interface LLMConfig {
 
   /** API key (usually from environment variable) */
   apiKey: string;
+
+  /** Custom endpoint URL (required for aria-tasks, optional for others) */
+  endpoint?: string | undefined;
 
   /** Model name */
   model: string;
@@ -61,12 +73,21 @@ export interface LLMConfig {
  * Default configurations per provider
  */
 export const DEFAULT_CONFIGS: Record<LLMProvider, Partial<LLMConfig>> = {
+  // ARIA Tasks - Azure-hosted Kimi (primary provider)
+  'aria-tasks': {
+    model: 'kimi-2.5',
+    temperature: 0.3,
+    maxTokens: 4096,
+    timeoutMs: 60000,
+    rateLimit: 60, // 60 requests per minute
+  },
+  // Public Moonshot API (fallback)
   kimi: {
     model: 'moonshot-v1-8k',
     temperature: 0.3,
     maxTokens: 4096,
     timeoutMs: 60000,
-    rateLimit: 60, // 60 requests per minute
+    rateLimit: 60,
   },
   openai: {
     model: 'gpt-4-turbo-preview',
@@ -91,19 +112,53 @@ export const TOKEN_COSTS: Record<
   LLMProvider,
   { input: number; output: number }
 > = {
-  kimi: { input: 0.012, output: 0.012 }, // Kimi pricing
+  'aria-tasks': { input: 0.012, output: 0.012 }, // Azure-hosted Kimi
+  kimi: { input: 0.012, output: 0.012 }, // Public Kimi pricing
   openai: { input: 0.01, output: 0.03 }, // GPT-4 Turbo
   anthropic: { input: 0.00025, output: 0.00125 }, // Claude 3 Haiku
 };
 
 /**
  * API endpoints per provider
+ *
+ * Note: aria-tasks uses a dynamic endpoint from ARIA_TASKS_ENDPOINT env var.
+ * The placeholder here is never used directly - getEndpoint() handles it.
  */
 const API_ENDPOINTS: Record<LLMProvider, string> = {
+  'aria-tasks': '', // Dynamic - from ARIA_TASKS_ENDPOINT env var
   kimi: 'https://api.moonshot.cn/v1/chat/completions',
   openai: 'https://api.openai.com/v1/chat/completions',
   anthropic: 'https://api.anthropic.com/v1/messages',
 };
+
+/**
+ * Get the API endpoint for a provider
+ *
+ * ARIA Tasks uses Azure AI Foundry with a user-provided endpoint.
+ */
+function getEndpoint(provider: LLMProvider, customEndpoint?: string): string {
+  if (provider === 'aria-tasks') {
+    // ARIA Tasks requires an endpoint from config or environment
+    // Primary: AZURE_AI_FOUNDRY_ENDPOINT (GitHub Actions)
+    // Fallback: ARIA_TASKS_ENDPOINT (local dev)
+    const endpoint = customEndpoint ||
+                     process.env['AZURE_AI_FOUNDRY_ENDPOINT'] ||
+                     process.env['ARIA_TASKS_ENDPOINT'];
+    if (!endpoint) {
+      throw new Error(
+        'ARIA Tasks requires AZURE_AI_FOUNDRY_ENDPOINT environment variable. ' +
+        'Set it to your Azure AI Foundry endpoint (e.g., https://your-resource.openai.azure.com). ' +
+        'For local dev, you can use ARIA_TASKS_ENDPOINT instead.'
+      );
+    }
+    // Azure OpenAI uses /openai/deployments/{model}/chat/completions path
+    // But when using OpenAI SDK compatibility mode, we use /v1/chat/completions
+    return endpoint.endsWith('/')
+      ? `${endpoint}v1/chat/completions`
+      : `${endpoint}/v1/chat/completions`;
+  }
+  return API_ENDPOINTS[provider];
+}
 
 /**
  * Response from chat completion
@@ -277,7 +332,8 @@ export class LLMClient {
   private readonly costTracker: CostTracker;
 
   constructor(config: Partial<LLMConfig> & { apiKey: string }) {
-    const provider = config.provider || 'kimi';
+    // Default to aria-tasks (Azure-hosted Kimi) as primary provider
+    const provider = config.provider || 'aria-tasks';
     const defaults = DEFAULT_CONFIGS[provider];
 
     const maxTokens = config.maxTokens ?? defaults.maxTokens ?? 4096;
@@ -286,7 +342,8 @@ export class LLMClient {
     this.config = {
       provider,
       apiKey: config.apiKey,
-      model: config.model || defaults.model || 'moonshot-v1-8k',
+      endpoint: config.endpoint,
+      model: config.model || defaults.model || 'kimi-2.5',
       temperature: config.temperature ?? defaults.temperature ?? 0.3,
       maxTokens,
       timeoutMs: config.timeoutMs ?? defaults.timeoutMs ?? 60000,
@@ -361,7 +418,7 @@ export class LLMClient {
    */
   private async makeRequest(messages: ChatMessage[]): Promise<ChatResponse> {
     const startTime = Date.now();
-    const endpoint = API_ENDPOINTS[this.config.provider];
+    const endpoint = getEndpoint(this.config.provider, this.config.endpoint);
 
     // Build request body based on provider
     const body = this.buildRequestBody(messages);
@@ -449,7 +506,7 @@ export class LLMClient {
       };
     }
 
-    // OpenAI-compatible format (Kimi, OpenAI)
+    // OpenAI-compatible format (ARIA Tasks, Kimi, OpenAI)
     return {
       model: this.config.model,
       messages,
@@ -591,7 +648,30 @@ export function createLLMClient(config: Partial<LLMConfig> & { apiKey: string })
 }
 
 /**
- * Create a Kimi client
+ * Create an ARIA Tasks client (Azure-hosted Kimi)
+ *
+ * This is the primary provider for Hawky code review.
+ * Uses AZURE_AI_FOUNDRY_ENDPOINT (GitHub Actions) or ARIA_TASKS_ENDPOINT (local dev).
+ */
+export function createAriaTasksClient(
+  apiKey: string,
+  endpoint?: string,
+  config?: Partial<LLMConfig>
+): LLMClient {
+  return new LLMClient({
+    ...config,
+    provider: 'aria-tasks',
+    apiKey,
+    endpoint: endpoint ||
+              process.env['AZURE_AI_FOUNDRY_ENDPOINT'] ||
+              process.env['ARIA_TASKS_ENDPOINT'],
+  });
+}
+
+/**
+ * Create a Kimi client (public Moonshot API)
+ *
+ * Fallback when ARIA Tasks is not available.
  */
 export function createKimiClient(apiKey: string, config?: Partial<LLMConfig>): LLMClient {
   return new LLMClient({
@@ -635,6 +715,7 @@ export function loadLLMConfig(
     llm?: {
       provider?: LLMProvider;
       api_key?: string;
+      endpoint?: string;
       model?: string;
       temperature?: number;
       max_tokens?: number;
@@ -643,14 +724,25 @@ export function loadLLMConfig(
   }
 ): LLMConfig | null {
   const llmConfig = hawkyConfig?.llm;
-  const provider = llmConfig?.provider || 'kimi';
+  // Default to aria-tasks (Azure-hosted Kimi)
+  const provider = llmConfig?.provider || 'aria-tasks';
 
   // Get API key from config or environment
   let apiKey = llmConfig?.api_key;
+  let endpoint = llmConfig?.endpoint;
 
   if (!apiKey) {
-    // Try environment variables
+    // Try environment variables based on provider
     switch (provider) {
+      case 'aria-tasks':
+        // Primary: GitHub secrets (AZURE_AI_FOUNDRY_*)
+        // Fallback: ARIA_TASKS_* for local dev
+        apiKey = process.env['AZURE_AI_FOUNDRY_KEY'] ||
+                 process.env['ARIA_TASKS_API_KEY'];
+        endpoint = endpoint ||
+                   process.env['AZURE_AI_FOUNDRY_ENDPOINT'] ||
+                   process.env['ARIA_TASKS_ENDPOINT'];
+        break;
       case 'kimi':
         apiKey = process.env['KIMI_API_KEY'] || process.env['MOONSHOT_API_KEY'];
         break;
@@ -663,10 +755,16 @@ export function loadLLMConfig(
     }
   }
 
-  // Handle ${VAR} syntax
+  // Handle ${VAR} syntax for API key
   if (apiKey && apiKey.startsWith('${') && apiKey.endsWith('}')) {
     const varName = apiKey.slice(2, -1);
     apiKey = process.env[varName];
+  }
+
+  // Handle ${VAR} syntax for endpoint
+  if (endpoint && endpoint.startsWith('${') && endpoint.endsWith('}')) {
+    const varName = endpoint.slice(2, -1);
+    endpoint = process.env[varName];
   }
 
   if (!apiKey) {
@@ -680,7 +778,8 @@ export function loadLLMConfig(
   return {
     provider,
     apiKey,
-    model: llmConfig?.model || defaults.model || 'moonshot-v1-8k',
+    endpoint,
+    model: llmConfig?.model || defaults.model || 'kimi-2.5',
     temperature: llmConfig?.temperature ?? defaults.temperature ?? 0.3,
     maxTokens,
     timeoutMs: (llmConfig?.timeout ?? 60) * 1000,
