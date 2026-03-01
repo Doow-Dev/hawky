@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Build Gate** - Build verification with configurable commands and timeout
 - **Test Gate** - Test suite execution with configurable commands and timeout
 
-#### Design System Gate (E004)
+#### Design System Gate
 - **Banned Classes Detection** - Flag deprecated utility classes with configurable blocklist
 - **Hardcoded Color Detection** - Ensure colors use design tokens (hex, rgb, hsl patterns)
 - **Spacing Enforcement** - Validate spacing values against design system scale
@@ -38,13 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Component Graph Impact** - Analyze component dependency chains for blast radius
 - **Import Path Consistency** - Ensure consistent import patterns across codebase
 
-#### Visual Regression Testing (E008)
+#### Visual Regression Testing
 - **Playwright Screenshot Diffing** - Automated visual testing with configurable thresholds
 - **Baseline Management** - Store and compare visual baselines across branches
 - **Threshold Configuration** - Set tolerance for visual changes (default: 0.1% pixel difference)
 - **Headless Mode** - Run browser tests in CI without display
 
-#### LLM-Powered Code Review (E009)
+#### LLM-Powered Code Review
 - **Semantic Code Analysis** - AI reviews code for logical issues, security, and patterns
 - **Azure AI Foundry Integration** - Uses kimi-2.5 model via Azure AI Foundry
 - **Context Assembly Pipeline** - Builds relevant context from PR diff and codebase
@@ -54,21 +54,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spec Compliance Analysis** - Checks code against API specs and contracts
 - **Feedback Learning Loop** - Improves suggestions based on developer feedback
 
-#### Baseline Management (E002)
+#### Baseline Management
 - **Baseline Generation** - Create baseline.json via workflow_dispatch to track existing violations
 - **Onboarding Report** - Auto-generated tech debt summary with violation breakdown by category
 - **New vs Existing Violation Tracking** - Only new violations block merge; existing ones are tracked
 - **Violation Hashing** - Content-aware hashing to identify violations across file changes
 - **Baseline Mode** - Special mode to generate baselines from clean branches
 
-#### Suppression System (E003)
+#### Suppression System
 - **.hawkyignore File** - Pattern-based permanent suppressions with glob support
 - **Inline Suppressions** - `// hawk-ignore: reason` comments for per-violation suppression
 - **Rule-Specific Ignores** - Target specific rules with `eslint:rule-name` or `semgrep:rule-id` syntax
 - **Path-Based Ignores** - Ignore violations in specific directories (e.g., `legacy/**`)
 - **Suppression Dashboard** - PR comment shows all suppressions with justification status
 
-#### Coordination Checks (E005)
+#### Coordination Checks
 - **Concurrent PR Detection (S035)** - Warn when multiple PRs modify the same files
 - **Contract Divergence Detection (S036)** - Block when API contract changes conflict with frontend PRs
 - **Parallel Migration Detection (S037)** - Block when multiple PRs contain database migrations
@@ -80,7 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Test Count Regression (S043)** - Warn when test count decreases
 - **Authorship Attribution (S045)** - Track mixed human/AI authorship (opt-in)
 
-#### Sprint Integration (E006)
+#### Sprint Integration
 - **Story ID Validation** - Verify PR references valid sprint story from SPRINT.md
 - **Auto-Labeling** - Automatically tag PRs based on scope and files changed
 - **Scope Creep Detection** - Flag when PR changes exceed expected story scope
@@ -89,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Activity Logging** - Auto-log PR events to ACTIVITY.md
 - **Notifications Routing** - Route PR events to NOTIFICATIONS.md for team awareness
 
-#### Multi-Stack Support (E011)
+#### Multi-Stack Support
 - **Auto-Detection** - Automatically detect TypeScript, Go, Rust, Python, Terraform, Docker, Kubernetes
 - **Stack-Specific Gates** - Run appropriate gates based on detected tech stack
 - **Registry System** - Extensible stack module registry for custom stacks
@@ -108,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Environment Variables** - Support for `AZURE_AI_FOUNDRY_KEY`, `AZURE_AI_FOUNDRY_ENDPOINT`
 - **Action Inputs** - Full control via GitHub Action inputs
 
-#### API Contracts (E001)
+#### API Contracts
 - **OpenAPI Spec Parser** - Parse and validate OpenAPI/Swagger specifications
 - **Response Shape Validation** - Detect breaking changes in API response structures
 - **Breaking Change Detection** - Warn when endpoints alter request/response contracts
