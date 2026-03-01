@@ -65,3 +65,21 @@ export {
   formatNotificationEntry,
   routeNotifications,
 } from './notifications-routing';
+
+export {
+  // Types
+  type PREvent,
+  type PREventContext,
+  type ActivityEntry,
+  type ActivityLoggingResult,
+  // Functions
+  formatDate,
+  normalizeAuthorToAgent,
+  extractStoryIdForActivity,
+  summarizeChangedFiles,
+  buildOpenedEntry,
+  buildReviewedEntry,
+  buildMergedEntry,
+  buildClosedEntry,
+  generateActivityEntries,
+} from './activity-logging';
