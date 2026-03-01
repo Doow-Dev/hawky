@@ -3,7 +3,7 @@
  *
  * Exports report types and reporters for Hawky.
  */
-export type { CoordinationFinding, CoordinationTier, GateSummary, ReportData, ReportConfig, } from './types';
+export type { CoordinationFinding, CoordinationTier, GateSummary, ReportData, ReportConfig, SuppressionEntry, } from './types';
 export { DEFAULT_REPORT_CONFIG, GATE_DISPLAY_NAMES, gateResultToSummary, } from './types';
 export { generatePRComment, postPRComment, HAWKY_COMMENT_MARKER, } from './pr-comment';
 export { writeStepSummary, generateStepSummaryMarkdown, } from './step-summary';
