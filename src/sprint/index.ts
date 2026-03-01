@@ -35,3 +35,19 @@ export {
   findTriggerFiles,
   computeAutoLabels,
 } from './auto-label';
+
+export {
+  // Types
+  type OutOfScopeFile,
+  type ScopeCreepResult,
+  type ScopeCreepOptions,
+  // Constants
+  ALWAYS_ALLOWED_PATTERNS,
+  // Functions
+  parseScopeFromSprintMd,
+  parseScopeString,
+  fileMatchesScope,
+  isAlwaysAllowed,
+  detectScopeCreep,
+  formatScopeCreepWarning,
+} from './scope-creep';
