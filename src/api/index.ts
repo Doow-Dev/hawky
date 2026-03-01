@@ -83,3 +83,26 @@ export {
   generateAndWriteTests,
   formatTestGeneratorReport,
 } from './test-generator';
+
+export {
+  // Types
+  type DocumentedEndpoint,
+  type DocumentedField,
+  type ParsedContracts,
+  type DriftKind,
+  type DriftViolation,
+  type DriftResult,
+  type ParseContractsOptions,
+  type ParseContractsResult,
+  type ContractsCheckOptions,
+  type ContractsCheckResult,
+  // Constants
+  CONTRACT_FILE_LOCATIONS,
+  // Functions
+  findContractsFile,
+  parseContractsFile,
+  parseContracts,
+  detectDrift,
+  checkContractsIntegration,
+  formatDriftReport,
+} from './contracts-integration';
