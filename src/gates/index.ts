@@ -87,3 +87,17 @@ export {
   type BundleSizeDelta,
   type ComponentGraphEntry,
 } from './frontend-checks';
+
+// Visual Gate
+export {
+  visualGate,
+  runVisualGate,
+  resultToAnnotation as visualResultToAnnotation,
+} from './visual';
+
+// LLM Review Gate
+export {
+  createLLMReviewGate,
+  runLLMReviewGate,
+  type LLMReviewGateOptions,
+} from './llm-review';

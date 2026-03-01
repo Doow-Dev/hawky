@@ -1,5 +1,7 @@
 /**
  * Tests for Stale Branch Detection (S038)
+ *
+ * Per spec: Flags if > 2 days old OR > 10 commits behind
  */
 
 import {
@@ -57,8 +59,8 @@ describe('checkStaleBranch', () => {
     expect(result.commitsBehind).toBe(0);
   });
 
-  it('should return isStale=false when below default threshold (50)', async () => {
-    const octokit = createMockOctokit(30);
+  it('should return isStale=false when below default threshold (10)', async () => {
+    const octokit = createMockOctokit(5);
     const result = await checkStaleBranch({
       octokit,
       owner: 'owner',
@@ -68,11 +70,11 @@ describe('checkStaleBranch', () => {
     });
 
     expect(result.isStale).toBe(false);
-    expect(result.commitsBehind).toBe(30);
+    expect(result.commitsBehind).toBe(5);
   });
 
-  it('should return isStale=true when at default threshold (50)', async () => {
-    const octokit = createMockOctokit(50);
+  it('should return isStale=true when above default threshold (10)', async () => {
+    const octokit = createMockOctokit(15);
     const result = await checkStaleBranch({
       octokit,
       owner: 'owner',
@@ -82,11 +84,12 @@ describe('checkStaleBranch', () => {
     });
 
     expect(result.isStale).toBe(true);
-    expect(result.commitsBehind).toBe(50);
+    expect(result.commitsBehind).toBe(15);
+    expect(result.staleReason).toBe('commits');
   });
 
-  it('should return isStale=true when above threshold', async () => {
-    const octokit = createMockOctokit(75);
+  it('should use default threshold of 10 (per spec)', async () => {
+    const octokit = createMockOctokit(9);
     const result = await checkStaleBranch({
       octokit,
       owner: 'owner',
@@ -95,21 +98,21 @@ describe('checkStaleBranch', () => {
       baseBranch: 'main',
     });
 
-    expect(result.isStale).toBe(true);
-  });
-
-  it('should use default threshold of 50', async () => {
-    const octokit = createMockOctokit(49);
-    const result = await checkStaleBranch({
-      octokit,
-      owner: 'owner',
-      repo: 'repo',
-      headBranch: 'feature/branch',
-      baseBranch: 'main',
-    });
-
-    expect(result.threshold).toBe(50);
+    expect(result.threshold).toBe(10);
     expect(result.isStale).toBe(false);
+  });
+
+  it('should use default daysThreshold of 2 (per spec)', async () => {
+    const octokit = createMockOctokit(0);
+    const result = await checkStaleBranch({
+      octokit,
+      owner: 'owner',
+      repo: 'repo',
+      headBranch: 'feature/branch',
+      baseBranch: 'main',
+    });
+
+    expect(result.daysThreshold).toBe(2);
   });
 
   it('should respect custom threshold', async () => {
@@ -120,15 +123,15 @@ describe('checkStaleBranch', () => {
       repo: 'repo',
       headBranch: 'feature/branch',
       baseBranch: 'main',
-      threshold: 10,
+      threshold: 25,
     });
 
-    expect(result.isStale).toBe(true);
-    expect(result.threshold).toBe(10);
+    expect(result.isStale).toBe(false);
+    expect(result.threshold).toBe(25);
   });
 
   it('should include branch names in result', async () => {
-    const octokit = createMockOctokit(10);
+    const octokit = createMockOctokit(5);
     const result = await checkStaleBranch({
       octokit,
       owner: 'owner',
@@ -143,7 +146,7 @@ describe('checkStaleBranch', () => {
 
   it('should include base commit date when available', async () => {
     const date = '2026-02-15T10:00:00Z';
-    const octokit = createMockOctokit(10, date);
+    const octokit = createMockOctokit(5, date);
     const result = await checkStaleBranch({
       octokit,
       owner: 'owner',
@@ -156,7 +159,7 @@ describe('checkStaleBranch', () => {
   });
 
   it('should not include baseLastCommitDate when not in API response', async () => {
-    const octokit = createMockOctokit(10, undefined);
+    const octokit = createMockOctokit(5, undefined);
     const result = await checkStaleBranch({
       octokit,
       owner: 'owner',
@@ -188,26 +191,76 @@ describe('checkStaleBranch', () => {
   });
 
   it('should handle exact threshold boundary correctly', async () => {
-    const octokit49 = createMockOctokit(49);
-    const octokit50 = createMockOctokit(50);
+    const octokit10 = createMockOctokit(10);
+    const octokit11 = createMockOctokit(11);
 
-    const result49 = await checkStaleBranch({
-      octokit: octokit49,
+    const result10 = await checkStaleBranch({
+      octokit: octokit10,
       owner: 'o',
       repo: 'r',
       headBranch: 'h',
       baseBranch: 'main',
     });
-    const result50 = await checkStaleBranch({
-      octokit: octokit50,
+    const result11 = await checkStaleBranch({
+      octokit: octokit11,
       owner: 'o',
       repo: 'r',
       headBranch: 'h',
       baseBranch: 'main',
     });
 
-    expect(result49.isStale).toBe(false);
-    expect(result50.isStale).toBe(true);
+    expect(result10.isStale).toBe(false);
+    expect(result11.isStale).toBe(true);
+  });
+
+  it('should flag stale by days when branchCreatedAt > daysThreshold', async () => {
+    const octokit = createMockOctokit(0); // Not stale by commits
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+    const result = await checkStaleBranch({
+      octokit,
+      owner: 'owner',
+      repo: 'repo',
+      headBranch: 'feature/branch',
+      baseBranch: 'main',
+      branchCreatedAt: threeDaysAgo,
+    });
+
+    expect(result.isStale).toBe(true);
+    expect(result.staleReason).toBe('days');
+    expect(result.daysOld).toBe(3);
+  });
+
+  it('should flag stale by both when commits and days exceed thresholds', async () => {
+    const octokit = createMockOctokit(15); // Stale by commits
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+    const result = await checkStaleBranch({
+      octokit,
+      owner: 'owner',
+      repo: 'repo',
+      headBranch: 'feature/branch',
+      baseBranch: 'main',
+      branchCreatedAt: threeDaysAgo,
+    });
+
+    expect(result.isStale).toBe(true);
+    expect(result.staleReason).toBe('both');
+  });
+
+  it('should not set staleReason when not stale', async () => {
+    const octokit = createMockOctokit(5); // Not stale by commits, no days info
+
+    const result = await checkStaleBranch({
+      octokit,
+      owner: 'owner',
+      repo: 'repo',
+      headBranch: 'feature/branch',
+      baseBranch: 'main',
+    });
+
+    expect(result.isStale).toBe(false);
+    expect(result.staleReason).toBeUndefined();
   });
 });
 
@@ -219,16 +272,19 @@ describe('formatStaleBranchWarning', () => {
   function buildResult(overrides: Partial<StaleCheckResult> = {}): StaleCheckResult {
     return {
       isStale: true,
-      commitsBehind: 75,
+      commitsBehind: 15,
       baseBranch: 'main',
       currentBranch: 'feature/my-branch',
-      threshold: 50,
+      threshold: 10,
+      daysThreshold: 2,
+      daysOld: 0,
+      staleReason: 'commits',
       ...overrides,
     };
   }
 
   it('should return empty string when branch is not stale', () => {
-    const result = buildResult({ isStale: false, commitsBehind: 10 });
+    const result = buildResult({ isStale: false, commitsBehind: 5 });
 
     expect(formatStaleBranchWarning(result)).toBe('');
   });
@@ -252,9 +308,9 @@ describe('formatStaleBranchWarning', () => {
   });
 
   it('should include threshold value', () => {
-    const md = formatStaleBranchWarning(buildResult({ threshold: 50 }));
+    const md = formatStaleBranchWarning(buildResult({ threshold: 10 }));
 
-    expect(md).toContain('50');
+    expect(md).toContain('10');
   });
 
   it('should include rebase instructions', () => {
@@ -309,5 +365,28 @@ describe('formatStaleBranchWarning', () => {
     const md = formatStaleBranchWarning(buildResult());
 
     expect(md.toLowerCase()).toMatch(/rebase|merge conflict|integration/);
+  });
+
+  it('should mention days when staleReason is days', () => {
+    const result = buildResult({
+      staleReason: 'days',
+      daysOld: 5,
+      daysThreshold: 2,
+    });
+    const md = formatStaleBranchWarning(result);
+
+    expect(md).toContain('5 days old');
+  });
+
+  it('should mention both commits and days when staleReason is both', () => {
+    const result = buildResult({
+      staleReason: 'both',
+      commitsBehind: 20,
+      daysOld: 5,
+    });
+    const md = formatStaleBranchWarning(result);
+
+    expect(md).toContain('5 days old');
+    expect(md).toContain('20 commits behind');
   });
 });

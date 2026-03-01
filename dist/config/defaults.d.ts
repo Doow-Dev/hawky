@@ -4,7 +4,7 @@
  * Default values for all configuration options.
  * Matches Sprint 1 behavior from hawky.yml env section.
  */
-import type { GateConfig, GateName, GracePeriodConfig, HawkyConfig } from './types';
+import type { CoordinationConfig, GateConfig, GateName, GracePeriodConfig, HawkyConfig, VisualConfig } from './types';
 /**
  * Default configuration for the TypeScript gate
  */
@@ -42,6 +42,14 @@ export declare const DESIGN_SYSTEM_GATE_DEFAULTS: GateConfig;
  */
 export declare const FRONTEND_CHECKS_GATE_DEFAULTS: GateConfig;
 /**
+ * Default configuration for the visual gate
+ */
+export declare const VISUAL_GATE_DEFAULTS: GateConfig;
+/**
+ * Default configuration for the LLM review gate
+ */
+export declare const LLM_REVIEW_GATE_DEFAULTS: GateConfig;
+/**
  * Map of gate names to their default configurations
  */
 export declare const GATE_DEFAULTS: Record<GateName, GateConfig>;
@@ -49,6 +57,22 @@ export declare const GATE_DEFAULTS: Record<GateName, GateConfig>;
  * Default grace period configuration
  */
 export declare const GRACE_PERIOD_DEFAULTS: GracePeriodConfig;
+/**
+ * Default visual testing configuration
+ */
+export declare const VISUAL_DEFAULTS: VisualConfig;
+/**
+ * Default coordination configuration
+ *
+ * S096: Coordination Integration
+ *
+ * Tiers:
+ * - BLOCK: contractDivergence (S036), parallelMigrations (S037), dependencyEnforcement (S041)
+ * - WARN: concurrentPrs (S035), staleBranch (S038), specMismatch (S039),
+ *         ownershipCollision (S040), testCountRegression (S043)
+ * - OPT-IN: sessionHandoff (S042), authorshipAttribution (S045)
+ */
+export declare const COORDINATION_DEFAULTS: CoordinationConfig;
 /**
  * Complete default configuration
  */

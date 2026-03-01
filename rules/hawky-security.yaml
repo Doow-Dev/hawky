@@ -1,0 +1,331 @@
+rules:
+  # S010: Math.random in Auth
+  # Detects use of Math.random() in authentication/security contexts
+  # Math.random() is not cryptographically secure
+  - id: hawky-math-random-in-auth
+    message: >-
+      Use of Math.random() in security-sensitive code. Math.random() is not
+      cryptographically secure. Use crypto.getRandomValues() or crypto.randomUUID() instead.
+    severity: ERROR
+    languages: [javascript, typescript]
+    patterns:
+      - pattern: Math.random()
+      - pattern-inside: |
+          function $FUNC(...) {
+            ...
+          }
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: '(?i)(auth|login|password|token|session|secret|key|hash|verify|sign|encrypt|decrypt|credential)'
+    metadata:
+      category: security
+      cwe: ["CWE-330"]
+      owasp: ["A02:2021"]
+      confidence: HIGH
+
+  # S010 variant: Math.random in files with auth-related names
+  - id: hawky-math-random-in-auth-file
+    message: >-
+      Use of Math.random() in authentication-related file. Math.random() is not
+      cryptographically secure. Use crypto.getRandomValues() or crypto.randomUUID() instead.
+    severity: ERROR
+    languages: [javascript, typescript]
+    patterns:
+      - pattern: Math.random()
+    paths:
+      include:
+        - '**/auth/**'
+        - '**/login/**'
+        - '**/session/**'
+        - '**/*auth*'
+        - '**/*login*'
+        - '**/*session*'
+        - '**/*token*'
+        - '**/*password*'
+    metadata:
+      category: security
+      cwe: ["CWE-330"]
+      owasp: ["A02:2021"]
+      confidence: HIGH
+
+  # S011: Raw SQL Unsafe
+  # Detects string concatenation in SQL queries (SQL injection risk)
+  - id: hawky-raw-sql-injection
+    message: >-
+      Potential SQL injection: string concatenation in SQL query.
+      Use parameterized queries or prepared statements instead.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: $DB.query("..." + $VAR + "...")
+      - pattern: $DB.query(`...${$VAR}...`)
+      - pattern: $DB.execute("..." + $VAR + "...")
+      - pattern: $DB.execute(`...${$VAR}...`)
+      - pattern: $DB.raw("..." + $VAR + "...")
+      - pattern: $DB.raw(`...${$VAR}...`)
+      - pattern: |
+          $QUERY = "SELECT ..." + $VAR
+      - pattern: |
+          $QUERY = `SELECT ...${$VAR}...`
+      - pattern: |
+          $QUERY = "INSERT ..." + $VAR
+      - pattern: |
+          $QUERY = "UPDATE ..." + $VAR
+      - pattern: |
+          $QUERY = "DELETE ..." + $VAR
+    metadata:
+      category: security
+      cwe: ["CWE-89"]
+      owasp: ["A03:2021"]
+      confidence: HIGH
+
+  # S012: Decode vs Verify Token
+  # Detects JWT decode without verification
+  - id: hawky-jwt-decode-without-verify
+    message: >-
+      JWT token decoded without verification. Use jwt.verify() instead of jwt.decode()
+      to ensure the token signature is valid and the token hasn't been tampered with.
+    severity: ERROR
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: jwt.decode($TOKEN)
+          - pattern: jsonwebtoken.decode($TOKEN)
+          - pattern: $JWT.decode($TOKEN)
+      - pattern-not-inside: |
+          jwt.verify(...)
+          ...
+      - pattern-not-inside: |
+          $JWT.verify(...)
+          ...
+    metadata:
+      category: security
+      cwe: ["CWE-347"]
+      owasp: ["A02:2021"]
+      confidence: HIGH
+
+  # S012 variant: jwtDecode from jwt-decode package
+  - id: hawky-jwt-decode-library
+    message: >-
+      Using jwt-decode library which only decodes without verification.
+      The token signature is NOT validated. Use jsonwebtoken.verify() or
+      jose.jwtVerify() to validate tokens before trusting their contents.
+    severity: WARNING
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: jwtDecode($TOKEN)
+      - pattern: decode($TOKEN)
+    paths:
+      include:
+        - '**/*auth*'
+        - '**/*token*'
+        - '**/*session*'
+        - '**/*login*'
+    metadata:
+      category: security
+      cwe: ["CWE-347"]
+      owasp: ["A02:2021"]
+      confidence: MEDIUM
+
+  # S013: Commented Guards
+  # Detects security checks that have been commented out
+  - id: hawky-commented-auth-check
+    message: >-
+      Commented-out authentication or authorization check detected.
+      This may indicate a security bypass. Remove the commented code or restore the check.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern-regex: '//\s*(if\s*\(\s*!?\s*(isAuthenticated|isAuthorized|checkAuth|requireAuth|verifyToken|validateToken|hasPermission|checkPermission))'
+      - pattern-regex: '//\s*(await\s+)?(auth|authenticate|authorize|checkAuth|requireAuth|verifyToken)\s*\('
+      - pattern-regex: '/\*[\s\S]*?(isAuthenticated|isAuthorized|checkAuth|requireAuth|verifyToken)[\s\S]*?\*/'
+    metadata:
+      category: security
+      cwe: ["CWE-284"]
+      owasp: ["A01:2021"]
+      confidence: HIGH
+
+  # S013 variant: Commented middleware
+  - id: hawky-commented-middleware
+    message: >-
+      Commented-out middleware that may include security checks.
+      Review and either remove or restore the middleware.
+    severity: WARNING
+    languages: [javascript, typescript]
+    pattern-regex: '//\s*(app|router)\.(use|get|post|put|delete|patch)\s*\(\s*(auth|authenticate|requireAuth|checkAuth|protect)'
+    metadata:
+      category: security
+      cwe: ["CWE-284"]
+      owasp: ["A01:2021"]
+      confidence: MEDIUM
+
+  # S014: dangerouslySetInnerHTML
+  # React XSS risk
+  - id: hawky-dangerous-innerhtml
+    message: >-
+      Use of dangerouslySetInnerHTML can lead to XSS vulnerabilities.
+      Ensure the HTML is properly sanitized using a library like DOMPurify,
+      or use safe alternatives like textContent.
+    severity: ERROR
+    languages: [javascript, typescript, tsx, jsx]
+    pattern-either:
+      - pattern: dangerouslySetInnerHTML={{ __html: $VAR }}
+      - pattern: dangerouslySetInnerHTML={{__html: $VAR}}
+      - pattern: |
+          <$COMPONENT dangerouslySetInnerHTML={...} />
+      - pattern: |
+          <$COMPONENT dangerouslySetInnerHTML={...}>...</$COMPONENT>
+    pattern-not:
+      # Allow if sanitized
+      - pattern: dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize($VAR) }}
+      - pattern: dangerouslySetInnerHTML={{ __html: sanitize($VAR) }}
+      - pattern: dangerouslySetInnerHTML={{ __html: sanitizeHtml($VAR) }}
+    metadata:
+      category: security
+      cwe: ["CWE-79"]
+      owasp: ["A03:2021"]
+      confidence: HIGH
+
+  # S014 variant: innerHTML assignment
+  - id: hawky-innerhtml-assignment
+    message: >-
+      Direct innerHTML assignment can lead to XSS vulnerabilities.
+      Use textContent for plain text, or sanitize HTML with DOMPurify.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: $EL.innerHTML = $VAR
+      - pattern: document.getElementById(...).innerHTML = $VAR
+      - pattern: document.querySelector(...).innerHTML = $VAR
+    pattern-not:
+      - pattern: $EL.innerHTML = DOMPurify.sanitize($VAR)
+      - pattern: $EL.innerHTML = sanitize($VAR)
+    metadata:
+      category: security
+      cwe: ["CWE-79"]
+      owasp: ["A03:2021"]
+      confidence: HIGH
+
+  # S017: Auth Guard Completeness
+  # Routes without authentication middleware
+  - id: hawky-unprotected-route
+    message: >-
+      Route handler without authentication middleware. Ensure all sensitive
+      routes have appropriate authentication checks.
+    severity: WARNING
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: |
+              router.get($PATH, async (req, res) => { ... })
+          - pattern: |
+              router.post($PATH, async (req, res) => { ... })
+          - pattern: |
+              router.put($PATH, async (req, res) => { ... })
+          - pattern: |
+              router.delete($PATH, async (req, res) => { ... })
+          - pattern: |
+              app.get($PATH, async (req, res) => { ... })
+          - pattern: |
+              app.post($PATH, async (req, res) => { ... })
+      - pattern-not-inside: |
+          router.$METHOD($PATH, $AUTH, ...)
+      - pattern-not-inside: |
+          app.$METHOD($PATH, $AUTH, ...)
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: '.*(user|admin|account|profile|setting|dashboard|api).*'
+    metadata:
+      category: security
+      cwe: ["CWE-862"]
+      owasp: ["A01:2021"]
+      confidence: MEDIUM
+
+  # S017 variant: Next.js API routes
+  - id: hawky-nextjs-unprotected-api
+    message: >-
+      Next.js API route without authentication check. Add authentication
+      verification at the start of the handler.
+    severity: WARNING
+    languages: [javascript, typescript]
+    patterns:
+      - pattern: |
+          export default async function handler(req, res) {
+            ...
+          }
+      - pattern-not: |
+          export default async function handler(req, res) {
+            ...
+            $AUTH(...)
+            ...
+          }
+    paths:
+      include:
+        - '**/api/**'
+        - '**/pages/api/**'
+        - '**/app/api/**'
+    metadata:
+      category: security
+      cwe: ["CWE-862"]
+      owasp: ["A01:2021"]
+      confidence: LOW
+
+  # S018: IDOR Patterns
+  # Direct object reference without authorization check
+  - id: hawky-idor-user-id
+    message: >-
+      Potential IDOR vulnerability: using user-supplied ID to fetch data without
+      authorization check. Verify that the requesting user has permission to
+      access the requested resource.
+    severity: ERROR
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $DB.findById(req.params.$ID)
+          - pattern: |
+              $DB.findOne({ _id: req.params.$ID })
+          - pattern: |
+              $DB.findOne({ id: req.params.$ID })
+          - pattern: |
+              $REPO.findById(req.params.$ID)
+          - pattern: |
+              await $DB.query(`... WHERE id = ${req.params.$ID}`)
+      - pattern-not-inside: |
+          if ($COND) { ... }
+      - metavariable-regex:
+          metavariable: $ID
+          regex: '(id|userId|user_id|accountId|account_id)'
+    metadata:
+      category: security
+      cwe: ["CWE-639"]
+      owasp: ["A01:2021"]
+      confidence: HIGH
+
+  # S018 variant: Object access without ownership check
+  - id: hawky-idor-no-ownership
+    message: >-
+      Resource access without ownership verification. Check that the resource
+      belongs to the requesting user before returning it.
+    severity: WARNING
+    languages: [javascript, typescript]
+    patterns:
+      - pattern: |
+          const $RESOURCE = await $MODEL.findById($ID);
+          ...
+          res.json($RESOURCE);
+      - pattern-not: |
+          const $RESOURCE = await $MODEL.findById($ID);
+          ...
+          if ($RESOURCE.$OWNER === ...) { ... }
+          ...
+      - pattern-not: |
+          const $RESOURCE = await $MODEL.findById($ID);
+          ...
+          if ($RESOURCE.$OWNER !== ...) { ... }
+          ...
+    metadata:
+      category: security
+      cwe: ["CWE-639"]
+      owasp: ["A01:2021"]
+      confidence: MEDIUM

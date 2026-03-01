@@ -11,4 +11,6 @@ export { gitleaksGate, parseGitleaksOutput, getChangedFiles as gitleaksGetChange
 export { npmAuditGate, parseNpmAuditOutput, violationToAnnotation as npmAuditViolationToAnnotation, } from './npm-audit';
 export { designSystemGate, scanForBannedClasses, scanForHardcodedColors, scanForSpacingViolations, scanForFontSizeViolations, violationToAnnotation as designSystemViolationToAnnotation, } from './design-system';
 export { frontendChecksGate, scanForUnhandledAsyncState, scanForMissingKeys, scanForMissingDependencies, scanForRerenderTraps, scanForServerClientBoundary, scanForA11yIssues, calculateBundleDelta, scanForImageWithoutDimensions, scanForTypeScriptStrictIssues, buildDependencyGraph, detectCycles, scanForImportCycles, buildComponentGraph, analyzeComponentGraphImpact, scanForImportPathInconsistency, violationToAnnotation as frontendViolationToAnnotation, type BundleSizeDelta, type ComponentGraphEntry, } from './frontend-checks';
+export { visualGate, runVisualGate, resultToAnnotation as visualResultToAnnotation, } from './visual';
+export { createLLMReviewGate, runLLMReviewGate, type LLMReviewGateOptions, } from './llm-review';
 //# sourceMappingURL=index.d.ts.map

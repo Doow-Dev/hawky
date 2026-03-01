@@ -100,7 +100,7 @@ export async function runLLMReviewGate(
     const minConfidence = options.minConfidence ?? 0.5;
     if (result.confidence < minConfidence) {
       return {
-        gate: 'llm-review' as never, // Cast needed as llm-review isn't in GateName yet
+        gate: 'llm-review', // Cast needed as llm-review isn't in GateName yet
         status: 'skip',
         totalViolations: 0,
         newViolations: 0,
@@ -121,7 +121,7 @@ export async function runLLMReviewGate(
     const status = errorCount > 0 ? 'fail' : 'pass';
 
     return {
-      gate: 'llm-review' as never,
+      gate: 'llm-review',
       status,
       totalViolations: result.issues.length,
       newViolations: result.issues.length,
@@ -136,7 +136,7 @@ export async function runLLMReviewGate(
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
     return {
-      gate: 'llm-review' as never,
+      gate: 'llm-review',
       status: 'error',
       totalViolations: 0,
       newViolations: 0,
@@ -158,7 +158,7 @@ export function createLLMReviewGate(
   getOptions: () => Promise<LLMReviewGateOptions | null>
 ): Gate {
   return {
-    name: 'llm-review' as never,
+    name: 'llm-review',
     displayName: 'LLM Code Review',
 
     async canRun(): Promise<boolean> {
@@ -171,7 +171,7 @@ export function createLLMReviewGate(
 
       if (!options) {
         return {
-          gate: 'llm-review' as never,
+          gate: 'llm-review',
           status: 'skip',
           totalViolations: 0,
           newViolations: 0,

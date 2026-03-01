@@ -551,7 +551,9 @@ async function run(): Promise<void> {
 
         // Apply baseline and hawkyignore filtering
         if (result.violations.length > 0) {
-          result = filterViolations(result, baseline, ignorePatterns, cwd);
+          const filterResult = filterViolations(result, baseline, ignorePatterns, cwd);
+          result = filterResult.gateResult;
+          allSuppressions.push(...filterResult.suppressions);
         }
       } else {
         // Unsupported gate (build, test not yet implemented)

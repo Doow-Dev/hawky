@@ -2,7 +2,10 @@
  * Feedback Learning Loop (S080)
  *
  * Tracks which LLM suggestions were accepted or rejected by developers.
- * Logs to .hawky/feedback.json for future tuning.
+ * Logs to .hawky/feedback.jsonl (append-only JSONL format) for future tuning.
+ *
+ * JSONL format: Each line is a standalone JSON object.
+ * Append-only: New entries are added without reading/rewriting the file.
  *
  * Metrics tracked:
  * - Acceptance rate per category (security, performance, type-safety, etc.)
@@ -28,7 +31,7 @@ import * as path from 'path';
 export type FeedbackOutcome = 'accepted' | 'rejected' | 'dismissed';
 
 /**
- * A single feedback entry
+ * A single feedback entry (one line in the JSONL file)
  */
 export interface FeedbackEntry {
   /** When this feedback was recorded */
@@ -114,64 +117,59 @@ export interface CategoryMetrics {
   acceptanceRate: number;
 }
 
-/**
- * The feedback JSON file structure
- */
-export interface FeedbackFile {
-  /** Schema version for forward compatibility */
-  version: '1';
-
-  /** All feedback entries */
-  entries: FeedbackEntry[];
-
-  /** Cached metrics (regenerated on read) */
-  lastUpdated: string;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
 
-/** Default path for feedback file */
-export const DEFAULT_FEEDBACK_PATH = '.hawky/feedback.json';
+/** Default path for feedback file (JSONL format) */
+export const DEFAULT_FEEDBACK_PATH = '.hawky/feedback.jsonl';
 
 /** Minimum sample size for category rate to be "reliable" */
 const MIN_RELIABLE_SAMPLES = 5;
 
 // ============================================================================
-// File I/O
+// File I/O (JSONL)
 // ============================================================================
 
 /**
- * Load the feedback file from disk.
- * Returns null if the file doesn't exist.
+ * Load all feedback entries from the JSONL file.
+ * Returns empty array if the file doesn't exist.
+ *
+ * JSONL format: Each line is a standalone JSON object.
  */
-export function loadFeedback(feedbackPath: string = DEFAULT_FEEDBACK_PATH): FeedbackFile | null {
+export function loadFeedbackEntries(feedbackPath: string = DEFAULT_FEEDBACK_PATH): FeedbackEntry[] {
   try {
     if (!fs.existsSync(feedbackPath)) {
-      return null;
+      return [];
     }
 
     const raw = fs.readFileSync(feedbackPath, 'utf-8');
-    const parsed = JSON.parse(raw) as FeedbackFile;
+    const lines = raw.split('\n').filter((line) => line.trim().length > 0);
+    const entries: FeedbackEntry[] = [];
 
-    // Validate structure
-    if (!Array.isArray(parsed.entries)) {
-      return null;
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as FeedbackEntry;
+        entries.push(entry);
+      } catch {
+        // Skip malformed lines
+      }
     }
 
-    return parsed;
+    return entries;
   } catch {
-    return null;
+    return [];
   }
 }
 
 /**
- * Save the feedback file to disk.
+ * Append a single entry to the JSONL file.
  * Creates parent directories if they don't exist.
+ *
+ * This is O(1) — no need to read the existing file.
  */
-export function saveFeedback(
-  feedback: FeedbackFile,
+export function appendFeedbackEntry(
+  entry: FeedbackEntry,
   feedbackPath: string = DEFAULT_FEEDBACK_PATH
 ): void {
   const dir = path.dirname(feedbackPath);
@@ -179,18 +177,27 @@ export function saveFeedback(
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  fs.writeFileSync(feedbackPath, JSON.stringify(feedback, null, 2), 'utf-8');
+  const line = JSON.stringify(entry) + '\n';
+  fs.appendFileSync(feedbackPath, line, 'utf-8');
 }
 
 /**
- * Create a new empty feedback file
+ * Append multiple entries to the JSONL file (batch).
+ * More efficient than multiple single appends.
  */
-export function createEmptyFeedback(): FeedbackFile {
-  return {
-    version: '1',
-    entries: [],
-    lastUpdated: new Date().toISOString(),
-  };
+export function appendFeedbackEntries(
+  entries: FeedbackEntry[],
+  feedbackPath: string = DEFAULT_FEEDBACK_PATH
+): void {
+  if (entries.length === 0) return;
+
+  const dir = path.dirname(feedbackPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  const lines = entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n';
+  fs.appendFileSync(feedbackPath, lines, 'utf-8');
 }
 
 // ============================================================================
@@ -200,24 +207,19 @@ export function createEmptyFeedback(): FeedbackFile {
 /**
  * Record a feedback entry for an LLM suggestion.
  *
- * Loads the existing feedback file, appends the entry, and saves.
+ * Appends to the JSONL file (O(1), no file read needed).
  * Creates the file if it doesn't exist.
  */
 export function recordFeedback(
   entry: Omit<FeedbackEntry, 'timestamp'>,
   feedbackPath: string = DEFAULT_FEEDBACK_PATH
 ): void {
-  const feedback = loadFeedback(feedbackPath) ?? createEmptyFeedback();
-
   const fullEntry: FeedbackEntry = {
     ...entry,
     timestamp: new Date().toISOString(),
   };
 
-  feedback.entries.push(fullEntry);
-  feedback.lastUpdated = new Date().toISOString();
-
-  saveFeedback(feedback, feedbackPath);
+  appendFeedbackEntry(fullEntry, feedbackPath);
 }
 
 /**
@@ -229,15 +231,13 @@ export function recordFeedbackBatch(
 ): void {
   if (entries.length === 0) return;
 
-  const feedback = loadFeedback(feedbackPath) ?? createEmptyFeedback();
   const now = new Date().toISOString();
+  const fullEntries: FeedbackEntry[] = entries.map((entry) => ({
+    ...entry,
+    timestamp: now,
+  }));
 
-  for (const entry of entries) {
-    feedback.entries.push({ ...entry, timestamp: now });
-  }
-
-  feedback.lastUpdated = now;
-  saveFeedback(feedback, feedbackPath);
+  appendFeedbackEntries(fullEntries, feedbackPath);
 }
 
 // ============================================================================
@@ -261,10 +261,9 @@ function computeGroupMetrics(entries: FeedbackEntry[]): CategoryMetrics {
 }
 
 /**
- * Compute aggregated metrics from a feedback file
+ * Compute aggregated metrics from feedback entries
  */
-export function computeMetrics(feedback: FeedbackFile): FeedbackMetrics {
-  const entries = feedback.entries;
+export function computeMetrics(entries: FeedbackEntry[]): FeedbackMetrics {
   const totalEntries = entries.length;
 
   if (totalEntries === 0) {
@@ -339,6 +338,16 @@ export function computeMetrics(feedback: FeedbackFile): FeedbackMetrics {
     topRejectedCategories,
     dateRange: { earliest, latest },
   };
+}
+
+/**
+ * Load feedback entries and compute metrics in one call
+ */
+export function loadAndComputeMetrics(
+  feedbackPath: string = DEFAULT_FEEDBACK_PATH
+): FeedbackMetrics {
+  const entries = loadFeedbackEntries(feedbackPath);
+  return computeMetrics(entries);
 }
 
 // ============================================================================

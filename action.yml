@@ -6,12 +6,21 @@
 # - ESLint linting
 # - Semgrep security scanning
 # - Gitleaks secret detection
+# - NPM audit dependency scanning
+# - Design system compliance
+# - Visual regression testing
+# - LLM-powered code review
+# - Multi-stack detection & validation
 #
 # Usage:
 #   - uses: the-crux-squad/hawky@v1
 #     with:
 #       fail_fast: true
 #       gates: 'typescript,eslint,semgrep,gitleaks'
+#       visual_enabled: true
+#       visual_threshold: 0.1
+#       llm_enabled: true
+#       stacks: 'auto'
 
 name: 'Hawky Code Quality Gates'
 description: 'AI-powered code quality gates for multi-agent teams'
@@ -33,7 +42,7 @@ inputs:
     default: 'true'
 
   gates:
-    description: 'Comma-separated list of gates to run (typescript,eslint,semgrep,gitleaks)'
+    description: 'Comma-separated list of gates to run (typescript,eslint,semgrep,gitleaks,npm-audit,design-system,visual,llm-review)'
     required: false
     default: 'typescript,eslint,semgrep,gitleaks'
 
@@ -51,6 +60,66 @@ inputs:
     description: 'Commit and push baseline files after generation (only for baseline mode)'
     required: false
     default: 'false'
+
+  # Visual Regression Testing (E008)
+  visual_enabled:
+    description: 'Enable visual regression testing'
+    required: false
+    default: 'false'
+
+  visual_threshold:
+    description: 'Threshold for visual differences (0.0-1.0, where 1.0 = 100% different)'
+    required: false
+    default: '0.1'
+
+  visual_routes:
+    description: 'Comma-separated list of routes to test visually'
+    required: false
+    default: ''
+
+  # Stack Modules (E011)
+  stacks:
+    description: 'Comma-separated list of stacks to validate (typescript,go,rust,python,terraform,docker,kubernetes) or "auto" for auto-detection'
+    required: false
+    default: 'auto'
+
+  # LLM Review (E009)
+  llm_enabled:
+    description: 'Enable LLM-powered code review'
+    required: false
+    default: 'false'
+
+  llm_api_key:
+    description: 'API key for LLM service (Azure AI Foundry or compatible)'
+    required: false
+    default: ''
+
+  llm_endpoint:
+    description: 'LLM endpoint URL (Azure AI Foundry deployment URL)'
+    required: false
+    default: ''
+
+  # Sprint Integration (E006)
+  sprint_enabled:
+    description: 'Enable sprint tracking integration'
+    required: false
+    default: 'false'
+
+  sprint_file:
+    description: 'Path to sprint file for integration'
+    required: false
+    default: '.claude/work/SPRINT.md'
+
+  # Cross-Agent Coordination (E005)
+  coordination_enabled:
+    description: 'Enable cross-agent coordination checks'
+    required: false
+    default: 'true'
+
+  stale_branch_threshold:
+    description: 'Days before marking a branch as stale for coordination checks'
+    required: false
+    default: '10'
 
 outputs:
   status:
@@ -70,6 +139,18 @@ outputs:
 
   baseline_path:
     description: 'Path to generated baseline.json (baseline mode only)'
+
+  llm_review_summary:
+    description: 'Summary of LLM code review findings (if llm_enabled=true)'
+
+  visual_diff_count:
+    description: 'Number of visual differences detected (if visual_enabled=true)'
+
+  stacks_detected:
+    description: 'Comma-separated list of detected technology stacks'
+
+  coordination_issues:
+    description: 'Number of cross-agent coordination issues found'
 
 runs:
   using: 'node20'

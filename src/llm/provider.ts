@@ -279,10 +279,13 @@ export class LLMClient {
     options?: {
       maxRetries?: number;
       retryDelayMs?: number;
+      /** Override temperature for this request (0 = deterministic) */
+      temperature?: number;
     }
   ): Promise<ChatResponse> {
     const maxRetries = options?.maxRetries ?? 3;
     const baseDelay = options?.retryDelayMs ?? 1000;
+    const temperature = options?.temperature;
 
     let lastError: Error | null = null;
 
@@ -292,7 +295,7 @@ export class LLMClient {
         await this.rateLimiter.acquire();
 
         // Make the request
-        const response = await this.makeRequest(messages);
+        const response = await this.makeRequest(messages, temperature);
 
         // Track cost if enabled
         if (this.config.trackCost) {
@@ -325,7 +328,7 @@ export class LLMClient {
   /**
    * Make the actual API request
    */
-  private async makeRequest(messages: ChatMessage[]): Promise<ChatResponse> {
+  private async makeRequest(messages: ChatMessage[], temperatureOverride?: number): Promise<ChatResponse> {
     const startTime = Date.now();
 
     // Build endpoint URL
@@ -337,7 +340,7 @@ export class LLMClient {
     const body = {
       model: this.config.model,
       messages,
-      temperature: this.config.temperature,
+      temperature: temperatureOverride ?? this.config.temperature,
       max_tokens: this.config.maxTokens,
     };
 

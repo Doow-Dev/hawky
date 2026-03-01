@@ -134,6 +134,8 @@ export declare class LLMClient {
     chat(messages: ChatMessage[], options?: {
         maxRetries?: number;
         retryDelayMs?: number;
+        /** Override temperature for this request (0 = deterministic) */
+        temperature?: number;
     }): Promise<ChatResponse>;
     /**
      * Make the actual API request

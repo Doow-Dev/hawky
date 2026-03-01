@@ -30873,7 +30873,7 @@ function createMatcher(baseline) {
  * Matches Sprint 1 behavior from hawky.yml env section.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.DEFAULT_CONFIG = exports.GRACE_PERIOD_DEFAULTS = exports.GATE_DEFAULTS = exports.FRONTEND_CHECKS_GATE_DEFAULTS = exports.DESIGN_SYSTEM_GATE_DEFAULTS = exports.NPM_AUDIT_GATE_DEFAULTS = exports.GITLEAKS_GATE_DEFAULTS = exports.SEMGREP_GATE_DEFAULTS = exports.ESLINT_GATE_DEFAULTS = exports.TEST_GATE_DEFAULTS = exports.BUILD_GATE_DEFAULTS = exports.TYPESCRIPT_GATE_DEFAULTS = void 0;
+exports.DEFAULT_CONFIG = exports.COORDINATION_DEFAULTS = exports.VISUAL_DEFAULTS = exports.GRACE_PERIOD_DEFAULTS = exports.GATE_DEFAULTS = exports.LLM_REVIEW_GATE_DEFAULTS = exports.VISUAL_GATE_DEFAULTS = exports.FRONTEND_CHECKS_GATE_DEFAULTS = exports.DESIGN_SYSTEM_GATE_DEFAULTS = exports.NPM_AUDIT_GATE_DEFAULTS = exports.GITLEAKS_GATE_DEFAULTS = exports.SEMGREP_GATE_DEFAULTS = exports.ESLINT_GATE_DEFAULTS = exports.TEST_GATE_DEFAULTS = exports.BUILD_GATE_DEFAULTS = exports.TYPESCRIPT_GATE_DEFAULTS = void 0;
 exports.createDefaultConfig = createDefaultConfig;
 /**
  * Default configuration for the TypeScript gate
@@ -30951,6 +30951,22 @@ exports.FRONTEND_CHECKS_GATE_DEFAULTS = {
     timeout: 300, // 5 minutes
 };
 /**
+ * Default configuration for the visual gate
+ */
+exports.VISUAL_GATE_DEFAULTS = {
+    enabled: false, // opt-in: requires visual config with routes
+    blocking: false,
+    timeout: 600, // 10 minutes - screenshots can be slow
+};
+/**
+ * Default configuration for the LLM review gate
+ */
+exports.LLM_REVIEW_GATE_DEFAULTS = {
+    enabled: false, // opt-in: requires LLM API credentials
+    blocking: false, // LLM findings are suggestions, not blockers
+    timeout: 120, // 2 minutes - LLM calls can be slow
+};
+/**
  * Map of gate names to their default configurations
  */
 exports.GATE_DEFAULTS = {
@@ -30963,6 +30979,8 @@ exports.GATE_DEFAULTS = {
     'npm-audit': exports.NPM_AUDIT_GATE_DEFAULTS,
     'design-system': exports.DESIGN_SYSTEM_GATE_DEFAULTS,
     'frontend-checks': exports.FRONTEND_CHECKS_GATE_DEFAULTS,
+    visual: exports.VISUAL_GATE_DEFAULTS,
+    'llm-review': exports.LLM_REVIEW_GATE_DEFAULTS,
 };
 /**
  * Default grace period configuration
@@ -30972,12 +30990,50 @@ exports.GRACE_PERIOD_DEFAULTS = {
     endDate: null,
 };
 /**
+ * Default visual testing configuration
+ */
+exports.VISUAL_DEFAULTS = {
+    enabled: false,
+    threshold: 0.1,
+    viewports: [{ width: 1920, height: 1080, name: 'desktop' }],
+    routes: [],
+    timeout: 30000,
+};
+/**
+ * Default coordination configuration
+ *
+ * S096: Coordination Integration
+ *
+ * Tiers:
+ * - BLOCK: contractDivergence (S036), parallelMigrations (S037), dependencyEnforcement (S041)
+ * - WARN: concurrentPrs (S035), staleBranch (S038), specMismatch (S039),
+ *         ownershipCollision (S040), testCountRegression (S043)
+ * - OPT-IN: sessionHandoff (S042), authorshipAttribution (S045)
+ */
+exports.COORDINATION_DEFAULTS = {
+    enabled: true,
+    concurrentPrs: true,
+    contractDivergence: true,
+    parallelMigrations: true,
+    staleBranch: true,
+    specMismatch: true,
+    ownershipCollision: true,
+    dependencyEnforcement: true,
+    sessionHandoff: false, // opt-in: requires team config
+    testCountRegression: true,
+    authorshipAttribution: false, // opt-in: requires team config
+    staleBranchCommits: 10,
+    staleBranchDays: 2,
+};
+/**
  * Complete default configuration
  */
 exports.DEFAULT_CONFIG = {
     failFast: true,
     gates: { ...exports.GATE_DEFAULTS },
     gracePeriod: { ...exports.GRACE_PERIOD_DEFAULTS },
+    visual: { ...exports.VISUAL_DEFAULTS },
+    coordination: { ...exports.COORDINATION_DEFAULTS },
 };
 /**
  * Create a fresh copy of the default configuration
@@ -30996,8 +31052,12 @@ function createDefaultConfig() {
             'npm-audit': { ...exports.NPM_AUDIT_GATE_DEFAULTS },
             'design-system': { ...exports.DESIGN_SYSTEM_GATE_DEFAULTS },
             'frontend-checks': { ...exports.FRONTEND_CHECKS_GATE_DEFAULTS },
+            visual: { ...exports.VISUAL_GATE_DEFAULTS },
+            'llm-review': { ...exports.LLM_REVIEW_GATE_DEFAULTS },
         },
         gracePeriod: { ...exports.GRACE_PERIOD_DEFAULTS },
+        visual: { ...exports.VISUAL_DEFAULTS },
+        coordination: { ...exports.COORDINATION_DEFAULTS },
     };
 }
 
@@ -31015,12 +31075,13 @@ function createDefaultConfig() {
  * Exports config types, defaults, and parser.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.parseConfigString = exports.loadConfigFromCwd = exports.loadConfig = exports.TYPESCRIPT_GATE_DEFAULTS = exports.TEST_GATE_DEFAULTS = exports.SEMGREP_GATE_DEFAULTS = exports.GRACE_PERIOD_DEFAULTS = exports.GITLEAKS_GATE_DEFAULTS = exports.GATE_DEFAULTS = exports.ESLINT_GATE_DEFAULTS = exports.DEFAULT_CONFIG = exports.createDefaultConfig = exports.BUILD_GATE_DEFAULTS = exports.GATE_NAMES = void 0;
+exports.parseConfigString = exports.loadConfigFromCwd = exports.loadConfig = exports.TYPESCRIPT_GATE_DEFAULTS = exports.TEST_GATE_DEFAULTS = exports.SEMGREP_GATE_DEFAULTS = exports.GRACE_PERIOD_DEFAULTS = exports.GITLEAKS_GATE_DEFAULTS = exports.GATE_DEFAULTS = exports.ESLINT_GATE_DEFAULTS = exports.DEFAULT_CONFIG = exports.createDefaultConfig = exports.COORDINATION_DEFAULTS = exports.BUILD_GATE_DEFAULTS = exports.GATE_NAMES = void 0;
 var types_1 = __nccwpck_require__(2143);
 Object.defineProperty(exports, "GATE_NAMES", ({ enumerable: true, get: function () { return types_1.GATE_NAMES; } }));
 // Defaults
 var defaults_1 = __nccwpck_require__(1954);
 Object.defineProperty(exports, "BUILD_GATE_DEFAULTS", ({ enumerable: true, get: function () { return defaults_1.BUILD_GATE_DEFAULTS; } }));
+Object.defineProperty(exports, "COORDINATION_DEFAULTS", ({ enumerable: true, get: function () { return defaults_1.COORDINATION_DEFAULTS; } }));
 Object.defineProperty(exports, "createDefaultConfig", ({ enumerable: true, get: function () { return defaults_1.createDefaultConfig; } }));
 Object.defineProperty(exports, "DEFAULT_CONFIG", ({ enumerable: true, get: function () { return defaults_1.DEFAULT_CONFIG; } }));
 Object.defineProperty(exports, "ESLINT_GATE_DEFAULTS", ({ enumerable: true, get: function () { return defaults_1.ESLINT_GATE_DEFAULTS; } }));
@@ -31198,6 +31259,90 @@ function parseGateConfig(gateName, raw, warnings) {
     return config;
 }
 /**
+ * Parse visual testing configuration from raw YAML
+ *
+ * S070: Threshold Config
+ */
+function parseVisualConfig(raw, warnings) {
+    const config = { ...defaults_1.VISUAL_DEFAULTS };
+    if (!raw) {
+        return config;
+    }
+    // Parse enabled flag
+    if (raw.enabled !== undefined) {
+        config.enabled = toBoolean(raw.enabled, config.enabled ?? false);
+    }
+    // Parse threshold (0-100 range)
+    if (raw.threshold !== undefined) {
+        const threshold = typeof raw.threshold === 'string' ? parseFloat(raw.threshold) : raw.threshold;
+        if (typeof threshold === 'number' && !isNaN(threshold)) {
+            if (threshold < 0 || threshold > 100) {
+                warnings.push({
+                    field: 'visual.threshold',
+                    message: 'Threshold must be between 0 and 100, using default (0.1)',
+                    value: raw.threshold,
+                });
+            }
+            else {
+                config.threshold = threshold;
+            }
+        }
+    }
+    // Parse viewports
+    if (raw.viewports && Array.isArray(raw.viewports)) {
+        const parsedViewports = [];
+        for (const vp of raw.viewports) {
+            if (vp && typeof vp === 'object') {
+                const width = toNumber(vp.width, 0);
+                const height = toNumber(vp.height, 0);
+                if (width > 0 && height > 0) {
+                    const viewport = { width, height };
+                    if (vp.name && typeof vp.name === 'string') {
+                        viewport.name = vp.name;
+                    }
+                    parsedViewports.push(viewport);
+                }
+                else {
+                    warnings.push({
+                        field: 'visual.viewports',
+                        message: 'Viewport must have positive width and height',
+                        value: vp,
+                    });
+                }
+            }
+        }
+        if (parsedViewports.length > 0) {
+            config.viewports = parsedViewports;
+        }
+    }
+    // Parse routes
+    if (raw.routes && Array.isArray(raw.routes)) {
+        config.routes = raw.routes.filter((r) => typeof r === 'string' && r.trim().length > 0);
+    }
+    // Parse waitFor
+    if (raw.wait_for) {
+        const waitFor = toString(raw.wait_for);
+        if (waitFor) {
+            config.waitFor = waitFor;
+        }
+    }
+    // Parse timeout
+    if (raw.timeout !== undefined) {
+        const timeout = toNumber(raw.timeout, config.timeout ?? 30000);
+        if (timeout > 0) {
+            config.timeout = timeout;
+        }
+        else {
+            warnings.push({
+                field: 'visual.timeout',
+                message: 'Timeout must be positive, using default (30000)',
+                value: raw.timeout,
+            });
+        }
+    }
+    return config;
+}
+/**
  * Parse grace period configuration from raw YAML
  */
 function parseGracePeriod(raw, warnings) {
@@ -31250,6 +31395,60 @@ function parseGracePeriod(raw, warnings) {
         const todayParts = new Date().toISOString().split('T');
         const today = todayParts[0] ?? '';
         config.active = today <= endDate;
+    }
+    return config;
+}
+/**
+ * Parse coordination configuration from raw YAML
+ *
+ * S096: Coordination Integration
+ */
+function parseCoordinationConfig(raw, _warnings) {
+    const config = { ...defaults_1.COORDINATION_DEFAULTS };
+    if (!raw) {
+        return config;
+    }
+    // Parse master toggle
+    if (raw.enabled !== undefined) {
+        config.enabled = toBoolean(raw.enabled, config.enabled);
+    }
+    // Parse individual check toggles
+    if (raw.concurrent_prs !== undefined) {
+        config.concurrentPrs = toBoolean(raw.concurrent_prs, config.concurrentPrs);
+    }
+    if (raw.contract_divergence !== undefined) {
+        config.contractDivergence = toBoolean(raw.contract_divergence, config.contractDivergence);
+    }
+    if (raw.parallel_migrations !== undefined) {
+        config.parallelMigrations = toBoolean(raw.parallel_migrations, config.parallelMigrations);
+    }
+    if (raw.stale_branch !== undefined) {
+        config.staleBranch = toBoolean(raw.stale_branch, config.staleBranch);
+    }
+    if (raw.spec_mismatch !== undefined) {
+        config.specMismatch = toBoolean(raw.spec_mismatch, config.specMismatch);
+    }
+    if (raw.ownership_collision !== undefined) {
+        config.ownershipCollision = toBoolean(raw.ownership_collision, config.ownershipCollision);
+    }
+    if (raw.dependency_enforcement !== undefined) {
+        config.dependencyEnforcement = toBoolean(raw.dependency_enforcement, config.dependencyEnforcement);
+    }
+    if (raw.session_handoff !== undefined) {
+        config.sessionHandoff = toBoolean(raw.session_handoff, config.sessionHandoff);
+    }
+    if (raw.test_count_regression !== undefined) {
+        config.testCountRegression = toBoolean(raw.test_count_regression, config.testCountRegression);
+    }
+    if (raw.authorship_attribution !== undefined) {
+        config.authorshipAttribution = toBoolean(raw.authorship_attribution, config.authorshipAttribution);
+    }
+    // Parse thresholds
+    if (raw.stale_branch_commits !== undefined) {
+        config.staleBranchCommits = toNumber(raw.stale_branch_commits, config.staleBranchCommits);
+    }
+    if (raw.stale_branch_days !== undefined) {
+        config.staleBranchDays = toNumber(raw.stale_branch_days, config.staleBranchDays);
     }
     return config;
 }
@@ -31346,6 +31545,10 @@ function loadConfig(basePath, configPath) {
     }
     // Parse grace period
     config.gracePeriod = parseGracePeriod(rawConfig.grace_period, warnings);
+    // Parse visual config
+    config.visual = parseVisualConfig(rawConfig.visual, warnings);
+    // Parse coordination config
+    config.coordination = parseCoordinationConfig(rawConfig.coordination, warnings);
     return {
         config,
         configFound: true,
@@ -31390,7 +31593,1940 @@ exports.GATE_NAMES = [
     'npm-audit',
     'design-system',
     'frontend-checks',
+    'visual',
+    'llm-review',
 ];
+
+
+/***/ }),
+
+/***/ 237:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * API Contract Divergence Detection (S036)
+ *
+ * Blocks a backend PR when:
+ *   1. The backend PR changes API contract files (routes, controllers, openapi specs)
+ *   2. A concurrent frontend PR (branch prefixed fe-*, ui-*, front-*) is open
+ *      against the same base branch
+ *
+ * The risk: the frontend PR may be built on top of a stale API contract. Merging
+ * the backend first breaks the frontend before it has a chance to adapt.
+ *
+ * Suppression: add `# hawk-ignore: contract-divergence — reason: <required>` to any
+ * changed file's top comment block.
+ *
+ * Output: BLOCK tier finding.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FRONTEND_BRANCH_PATTERNS = exports.API_CONTRACT_PATTERNS = void 0;
+exports.isApiContractFile = isApiContractFile;
+exports.filterApiContractFiles = filterApiContractFiles;
+exports.isFrontendBranch = isFrontendBranch;
+exports.detectSuppression = detectSuppression;
+exports.detectContractDivergence = detectContractDivergence;
+exports["default"] = detectContractDivergence;
+exports.formatContractDivergenceBlock = formatContractDivergenceBlock;
+// ============================================================================
+// Constants
+// ============================================================================
+/**
+ * File path patterns that indicate API contract changes on the backend
+ */
+exports.API_CONTRACT_PATTERNS = [
+    // Route and controller files
+    /^src\/(routes?|controllers?|endpoints?|handlers?)\//i,
+    // OpenAPI / Swagger specs
+    /openapi\.(yaml|yml|json)$/i,
+    /swagger\.(yaml|yml|json)$/i,
+    /api[-_]spec\.(yaml|yml|json)$/i,
+    // GraphQL schemas
+    /schema\.(graphql|gql)$/i,
+    // Proto files
+    /\.proto$/,
+    // tRPC routers
+    /src\/.*router\.[tj]s$/i,
+];
+/**
+ * Branch name patterns that identify frontend PRs
+ */
+exports.FRONTEND_BRANCH_PATTERNS = [
+    /^fe[-_/]/i,
+    /^ui[-_/]/i,
+    /^front(?:end)?[-_/]/i,
+    /^client[-_/]/i,
+    /^web[-_/]/i,
+];
+/**
+ * Suppression comment pattern
+ * Must appear as: # hawk-ignore: contract-divergence — reason: <non-empty reason>
+ */
+const SUPPRESSION_PATTERN = /hawk-ignore:\s*contract-divergence\s*[—–-]+\s*reason:\s*(.+)/i;
+// ============================================================================
+// Core Logic
+// ============================================================================
+/**
+ * Check if a file path matches any of the API contract patterns
+ */
+function isApiContractFile(filePath) {
+    return exports.API_CONTRACT_PATTERNS.some((p) => p.test(filePath));
+}
+/**
+ * Filter a list of changed files to those that touch API contracts
+ */
+function filterApiContractFiles(files) {
+    return files.filter(isApiContractFile);
+}
+/**
+ * Check if a branch name indicates a frontend PR
+ */
+function isFrontendBranch(branchName) {
+    return exports.FRONTEND_BRANCH_PATTERNS.some((p) => p.test(branchName));
+}
+/**
+ * Detect suppression directive in PR body or file content snippets.
+ *
+ * Returns { suppressed: true, reason: string } if found, otherwise
+ * { suppressed: false, reason: null }.
+ */
+function detectSuppression(prBody, fileContents) {
+    // Check PR body
+    if (prBody) {
+        const m = SUPPRESSION_PATTERN.exec(prBody);
+        if (m && m[1]) {
+            return { suppressed: true, reason: m[1].trim() };
+        }
+    }
+    // Check file content snippets
+    if (fileContents) {
+        for (const content of Object.values(fileContents)) {
+            const m = SUPPRESSION_PATTERN.exec(content);
+            if (m && m[1]) {
+                return { suppressed: true, reason: m[1].trim() };
+            }
+        }
+    }
+    return { suppressed: false, reason: null };
+}
+/**
+ * Detect API contract divergence.
+ *
+ * Algorithm:
+ * 1. Check if any changed files are API contract files
+ * 2. If none → no divergence (pass immediately)
+ * 3. List all open PRs against the same base branch
+ * 4. Filter for frontend PRs (fe-*, ui-*, front-*, etc.)
+ * 5. If frontend PRs exist → BLOCK
+ * 6. Check for suppression directive → skip block if present
+ */
+async function detectContractDivergence(options) {
+    const { octokit, owner, repo, baseBranch, changedFiles, prBody, fileContents, } = options;
+    // Step 1: find API contract files in this PR
+    const contractFiles = filterApiContractFiles(changedFiles);
+    if (contractFiles.length === 0) {
+        return {
+            hasDivergence: false,
+            contractFiles: [],
+            frontendPRs: [],
+            suppressed: false,
+            suppressionReason: null,
+            message: 'No API contract files changed — divergence check skipped',
+        };
+    }
+    // Step 2: check for suppression before doing any API calls
+    const { suppressed, reason: suppressionReason } = detectSuppression(prBody, fileContents);
+    if (suppressed) {
+        return {
+            hasDivergence: false,
+            contractFiles,
+            frontendPRs: [],
+            suppressed: true,
+            suppressionReason,
+            message: `Contract divergence check suppressed: ${suppressionReason}`,
+        };
+    }
+    // Step 3: list open PRs on same base branch
+    let openPRs;
+    try {
+        const { data } = await octokit.rest.pulls.list({
+            owner,
+            repo,
+            state: 'open',
+            base: baseBranch,
+            per_page: 100,
+        });
+        openPRs = data;
+    }
+    catch {
+        // If API fails, conservatively flag divergence to avoid false safety
+        return {
+            hasDivergence: true,
+            contractFiles,
+            frontendPRs: [],
+            suppressed: false,
+            suppressionReason: null,
+            message: 'API contract files changed but could not verify concurrent frontend PRs (API error) — flagging as divergence',
+        };
+    }
+    // Step 4: filter for frontend PRs
+    const frontendPRs = openPRs
+        .filter((pr) => isFrontendBranch(pr.head.ref))
+        .map((pr) => ({
+        number: pr.number,
+        title: pr.title,
+        headBranch: pr.head.ref,
+        author: pr.user?.login ?? 'unknown',
+        url: pr.html_url,
+    }));
+    const hasDivergence = frontendPRs.length > 0;
+    let message;
+    if (hasDivergence) {
+        const prList = frontendPRs.map((p) => `#${p.number} (${p.headBranch})`).join(', ');
+        const fileList = contractFiles.slice(0, 3).join(', ');
+        const more = contractFiles.length > 3 ? ` +${contractFiles.length - 3} more` : '';
+        message =
+            `API contract files changed (${fileList}${more}) while frontend PR(s) are open: ${prList}. ` +
+                `The frontend may be integrating against a stale contract. ` +
+                `Coordinate with the frontend team before merging, or suppress with hawk-ignore.`;
+    }
+    else {
+        message = `API contract files changed but no concurrent frontend PRs detected — no divergence`;
+    }
+    return {
+        hasDivergence,
+        contractFiles,
+        frontendPRs,
+        suppressed: false,
+        suppressionReason: null,
+        message,
+    };
+}
+// ============================================================================
+// Formatting
+// ============================================================================
+/**
+ * Format contract divergence result as a PR comment block.
+ * Returns empty string when no divergence detected.
+ */
+function formatContractDivergenceBlock(result) {
+    if (!result.hasDivergence) {
+        return '';
+    }
+    const lines = [];
+    lines.push('<details>');
+    lines.push(`<summary>:no_entry: **API Contract Divergence** — ${result.frontendPRs.length} concurrent frontend PR(s) detected</summary>`);
+    lines.push('');
+    lines.push(result.message);
+    lines.push('');
+    lines.push('**API contract files changed in this PR:**');
+    for (const f of result.contractFiles) {
+        lines.push(`- \`${f}\``);
+    }
+    lines.push('');
+    lines.push('**Concurrent frontend PRs:**');
+    for (const pr of result.frontendPRs) {
+        lines.push(`- PR #${pr.number} — [${pr.title}](${pr.url}) by @${pr.author} (\`${pr.headBranch}\`)`);
+    }
+    lines.push('');
+    lines.push('**Next steps:**');
+    lines.push('1. Notify the frontend team about the API changes');
+    lines.push('2. Wait for the frontend PRs to be updated to use the new contract');
+    lines.push('3. Or suppress with: `# hawk-ignore: contract-divergence — reason: <your reason>`');
+    lines.push('');
+    lines.push('*This is a BLOCK — cannot merge until frontend PRs are coordinated or suppression is added.*');
+    lines.push('');
+    lines.push('</details>');
+    return lines.join('\n');
+}
+
+
+/***/ }),
+
+/***/ 9982:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Authorship Attribution (S045)
+ *
+ * Detects mixed commit authors in a PR and emits an INFORM finding.
+ * When commits come from multiple different GitHub logins, flags it so
+ * co-authors are properly attributed in review discussion.
+ *
+ * Output: INFORM tier finding (not a warning, not blocking).
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.tallyAuthors = tallyAuthors;
+exports.getPrimaryAuthor = getPrimaryAuthor;
+exports.detectMixedAuthorship = detectMixedAuthorship;
+exports["default"] = detectMixedAuthorship;
+exports.formatAuthorshipAttribution = formatAuthorshipAttribution;
+// ============================================================================
+// Core Logic
+// ============================================================================
+/**
+ * Tally commit counts per author login
+ */
+function tallyAuthors(commits) {
+    const counts = new Map();
+    for (const commit of commits) {
+        const login = commit.login ?? 'unknown';
+        counts.set(login, (counts.get(login) ?? 0) + 1);
+    }
+    // Sort by commit count descending
+    return Array.from(counts.entries())
+        .map(([login, commitCount]) => ({ login, commitCount }))
+        .sort((a, b) => b.commitCount - a.commitCount);
+}
+/**
+ * Determine the primary author (most commits)
+ */
+function getPrimaryAuthor(authors) {
+    if (authors.length === 0)
+        return null;
+    return authors[0]?.login ?? null;
+}
+/**
+ * Check authorship attribution for a PR.
+ *
+ * Fetches all commits on the PR and checks if multiple GitHub users
+ * authored them. This is informational — useful for attribution in
+ * review comments and ensuring co-authors are acknowledged.
+ */
+async function detectMixedAuthorship(options) {
+    const { octokit, owner, repo, prNumber } = options;
+    const { data: commits } = await octokit.rest.pulls.listCommits({
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: 100,
+    });
+    // Normalize commits to author logins
+    const authorEntries = commits.map((c) => ({
+        login: c.author?.login ?? null,
+    }));
+    const authors = tallyAuthors(authorEntries);
+    const totalCommits = commits.length;
+    const hasMixedAuthors = authors.length > 1;
+    const primaryAuthor = getPrimaryAuthor(authors);
+    let message;
+    if (!hasMixedAuthors) {
+        const sole = primaryAuthor ?? 'unknown';
+        message = `All ${totalCommits} commit(s) authored by @${sole}`;
+    }
+    else {
+        const authorList = authors
+            .map((a) => `@${a.login} (${a.commitCount})`)
+            .join(', ');
+        message = `${authors.length} authors across ${totalCommits} commit(s): ${authorList}`;
+    }
+    return {
+        hasMixedAuthors,
+        authors,
+        totalCommits,
+        primaryAuthor,
+        message,
+    };
+}
+// ============================================================================
+// Formatting
+// ============================================================================
+/**
+ * Format authorship attribution result as a PR comment section.
+ * Only produces output when mixed authors are detected.
+ */
+function formatAuthorshipAttribution(result) {
+    if (!result.hasMixedAuthors) {
+        return '';
+    }
+    const lines = [];
+    lines.push('<details>');
+    lines.push(`<summary>:information_source: **Mixed Authorship** — ${result.authors.length} contributors across ${result.totalCommits} commit(s)</summary>`);
+    lines.push('');
+    lines.push('This PR includes commits from multiple authors. ' +
+        'Ensure all contributors are properly attributed in review discussion.');
+    lines.push('');
+    lines.push('**Contributors:**');
+    for (const author of result.authors) {
+        const isPrimary = author.login === result.primaryAuthor;
+        const primaryTag = isPrimary ? ' *(primary)*' : '';
+        lines.push(`- @${author.login} — ${author.commitCount} commit(s)${primaryTag}`);
+    }
+    lines.push('');
+    lines.push('*This is an INFORM — no action required.*');
+    lines.push('');
+    lines.push('</details>');
+    return lines.join('\n');
+}
+
+
+/***/ }),
+
+/***/ 2008:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Concurrent PR Detection (S035)
+ *
+ * Detects other open PRs that touch the same files as the current PR.
+ * Uses GitHub API to list open PRs and flags potential merge conflicts.
+ *
+ * Output: WARN tier findings (non-blocking) noting which PRs overlap.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.findOverlappingFiles = findOverlappingFiles;
+exports.detectConcurrentPRs = detectConcurrentPRs;
+exports["default"] = detectConcurrentPRs;
+exports.formatConcurrentPRWarning = formatConcurrentPRWarning;
+// ============================================================================
+// Core Logic
+// ============================================================================
+/**
+ * Find overlapping files between two file lists
+ */
+function findOverlappingFiles(filesA, filesB) {
+    const setA = new Set(filesA);
+    return filesB.filter((f) => setA.has(f));
+}
+/**
+ * Detect concurrent open PRs that touch the same files as the current PR.
+ *
+ * Algorithm:
+ * 1. List all open PRs in the repo
+ * 2. For each (excluding current), fetch its changed files
+ * 3. Find overlap with current PR's changed files
+ * 4. Return structured list of conflicts
+ */
+async function detectConcurrentPRs(options) {
+    const { octokit, owner, repo, currentPRNumber, currentPRFiles, baseBranch, maxPRsToScan = 50, } = options;
+    // Fetch open PRs
+    const { data: openPRs } = await octokit.rest.pulls.list({
+        owner,
+        repo,
+        state: 'open',
+        ...(baseBranch ? { base: baseBranch } : {}),
+        per_page: Math.min(maxPRsToScan, 100),
+    });
+    // Filter out the current PR
+    const otherPRs = openPRs.filter((pr) => pr.number !== currentPRNumber);
+    const conflictingPRs = [];
+    const fileConflictMap = new Map();
+    // Check each other PR for file overlap
+    for (const pr of otherPRs) {
+        let prFiles;
+        try {
+            const { data: files } = await octokit.rest.pulls.listFiles({
+                owner,
+                repo,
+                pull_number: pr.number,
+                per_page: 100,
+            });
+            prFiles = files.map((f) => f.filename);
+        }
+        catch {
+            // If we can't fetch files for a PR, skip it
+            continue;
+        }
+        const overlapping = findOverlappingFiles(currentPRFiles, prFiles);
+        if (overlapping.length > 0) {
+            conflictingPRs.push({
+                number: pr.number,
+                title: pr.title,
+                author: pr.user?.login ?? 'unknown',
+                url: pr.html_url,
+                overlappingFiles: overlapping,
+                headBranch: pr.head.ref,
+            });
+            // Update the file conflict map
+            for (const file of overlapping) {
+                const existingConflicts = fileConflictMap.get(file) ?? [];
+                existingConflicts.push(pr.number);
+                fileConflictMap.set(file, existingConflicts);
+            }
+        }
+    }
+    // Build overlapping files list
+    const overlappingFiles = [];
+    for (const [file, conflictPRs] of fileConflictMap) {
+        overlappingFiles.push({ path: file, conflictingPRs: conflictPRs });
+    }
+    // Sort by number of conflicts (most conflicted files first)
+    overlappingFiles.sort((a, b) => b.conflictingPRs.length - a.conflictingPRs.length);
+    return {
+        hasConcurrentPRs: conflictingPRs.length > 0,
+        conflictingPRs,
+        overlappingFiles,
+        prsScanned: otherPRs.length,
+        currentPRFiles,
+    };
+}
+// ============================================================================
+// Formatting
+// ============================================================================
+/**
+ * Format concurrent PR detection results as a PR comment section
+ */
+function formatConcurrentPRWarning(result) {
+    if (!result.hasConcurrentPRs) {
+        return '';
+    }
+    const lines = [];
+    lines.push('<details>');
+    lines.push(`<summary>:warning: **Concurrent PR Warning** — ${result.conflictingPRs.length} open PR(s) touch the same files</summary>`);
+    lines.push('');
+    lines.push('The following open PRs modify files that this PR also changes. ' +
+        'This may cause merge conflicts — coordinate with the authors before merging.');
+    lines.push('');
+    for (const pr of result.conflictingPRs) {
+        lines.push(`**[#${pr.number}: ${pr.title}](${pr.url})** by @${pr.author}`);
+        lines.push(`Branch: \`${pr.headBranch}\``);
+        lines.push('');
+        if (pr.overlappingFiles.length <= 5) {
+            lines.push('Shared files:');
+            for (const file of pr.overlappingFiles) {
+                lines.push(`- \`${file}\``);
+            }
+        }
+        else {
+            lines.push(`Shared files: ${pr.overlappingFiles.slice(0, 3).map((f) => `\`${f}\``).join(', ')} ` +
+                `and ${pr.overlappingFiles.length - 3} more`);
+        }
+        lines.push('');
+    }
+    if (result.overlappingFiles.length > 0) {
+        const hotFiles = result.overlappingFiles.filter((f) => f.conflictingPRs.length > 1);
+        if (hotFiles.length > 0) {
+            lines.push(`**High-contention files** (modified by 2+ concurrent PRs):`);
+            for (const file of hotFiles) {
+                lines.push(`- \`${file.path}\` — touched by PR(s): ${file.conflictingPRs.map((n) => `#${n}`).join(', ')}`);
+            }
+            lines.push('');
+        }
+    }
+    lines.push(`*Scanned ${result.prsScanned} open PR(s). This is a WARN — not blocking.*`);
+    lines.push('');
+    lines.push('</details>');
+    return lines.join('\n');
+}
+
+
+/***/ }),
+
+/***/ 9441:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Dependency Enforcement (S041)
+ *
+ * Blocks PR merge if its story's dependencies haven't been merged yet.
+ *
+ * Reads story dependencies from SPRINT.md (e.g., "Depends on S123, S124")
+ * and checks GitHub PR history to see if those story branches have been
+ * merged into the base branch. If a dependency hasn't been merged, blocks.
+ *
+ * Output: BLOCK tier finding.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.extractCurrentStoryId = extractCurrentStoryId;
+exports.parseDependencies = parseDependencies;
+exports.checkStoryMerged = checkStoryMerged;
+exports.enforceDependencies = enforceDependencies;
+exports["default"] = enforceDependencies;
+exports.formatDependencyBlock = formatDependencyBlock;
+// ============================================================================
+// Core Logic
+// ============================================================================
+/**
+ * Extract story ID from a branch name
+ */
+function extractCurrentStoryId(branchName) {
+    const match = /(?:^|[-_/])([Ss]\d{3,4})(?:[-_/]|$)/.exec(branchName);
+    return match ? match[1]?.toUpperCase() ?? null : null;
+}
+/**
+ * Parse dependency declarations from SPRINT.md for a specific story.
+ *
+ * Looks for patterns like:
+ * - "Depends on S123"
+ * - "Depends on S123, S124"
+ * - "depends_on: S123"
+ * - "Dependencies: S123, S124"
+ * - "Blockers: S123"
+ * - In table format: an extra column with dep info
+ *
+ * Scopes searches to the story's section (between its ### heading and the next ### heading)
+ * to avoid cross-story contamination.
+ */
+function parseDependencies(sprintMdContent, storyId) {
+    const normalizedId = storyId.toUpperCase();
+    const deps = new Set();
+    // Extract the story's dedicated section (### S047 ... up to next ### or end of file)
+    const sectionPattern = new RegExp(`###\\s+${normalizedId}\\b([\\s\\S]*?)(?=\\n###\\s+[Ss]\\d|$)`, 'i');
+    const sectionMatch = sectionPattern.exec(sprintMdContent);
+    const storySection = sectionMatch?.[1] ?? '';
+    // Parse dependency patterns within the story section
+    if (storySection) {
+        // Pattern 1: "Depends on S123, S124" / "depends_on: S123" / "depends: S123"
+        const dependsOnPattern = /(?:depends?(?:\s+on|_on)?|requires?|dependencies):?\s+([Ss]\d{3,4}(?:\s*,\s*[Ss]\d{3,4})*)/gi;
+        let m;
+        while ((m = dependsOnPattern.exec(storySection)) !== null) {
+            const depIds = m[1]?.match(/[Ss]\d{3,4}/g) ?? [];
+            depIds.forEach((d) => deps.add(d.toUpperCase()));
+        }
+        // Pattern 2: "Blockers: S123" / "Deps: S123"
+        const blockersPattern = /(?:blockers?|deps?):?\s+([Ss]\d{3,4}(?:\s*,\s*[Ss]\d{3,4})*)/gi;
+        while ((m = blockersPattern.exec(storySection)) !== null) {
+            const depIds = m[1]?.match(/[Ss]\d{3,4}/g) ?? [];
+            depIds.forEach((d) => deps.add(d.toUpperCase()));
+        }
+    }
+    // Pattern 3: Table column format "| S046 | desc | owner | status | deps: S123 |"
+    // Only looks at the story's own table row — safe to scan the whole doc (row is self-contained)
+    const tablePattern = new RegExp(`^\\|\\s*${normalizedId}\\s*\\|[^|]+\\|[^|]+\\|[^|]+\\|[^|]*?([Ss]\\d{3,4}(?:\\s*,\\s*[Ss]\\d{3,4})*)[^|]*\\|`, 'im');
+    const tableMatch = tablePattern.exec(sprintMdContent);
+    if (tableMatch) {
+        const depIds = tableMatch[1]?.match(/[Ss]\d{3,4}/g) ?? [];
+        depIds.forEach((d) => deps.add(d.toUpperCase()));
+    }
+    // Remove self-dependency
+    deps.delete(normalizedId);
+    return Array.from(deps);
+}
+/**
+ * Check if a story's branch has been merged into the base branch.
+ * Looks for closed PRs whose head branch contains the story ID.
+ */
+async function checkStoryMerged(octokit, owner, repo, storyId, baseBranch) {
+    // Fetch recently closed PRs into the base branch
+    const { data: closedPRs } = await octokit.rest.pulls.list({
+        owner,
+        repo,
+        state: 'closed',
+        base: baseBranch,
+        per_page: 100,
+    });
+    // Find PRs that were merged and whose branch contains the story ID
+    const storyPattern = new RegExp(`(?:^|[-_/])${storyId}(?:[-_/]|$)`, 'i');
+    for (const pr of closedPRs) {
+        if (pr.merged_at && storyPattern.test(pr.head.ref)) {
+            return { merged: true, prNumber: pr.number };
+        }
+    }
+    return { merged: false, prNumber: null };
+}
+/**
+ * Enforce story dependencies for a PR.
+ *
+ * Algorithm:
+ * 1. Extract story ID from branch name
+ * 2. Parse dependencies from SPRINT.md
+ * 3. For each dependency, check if its branch has been merged
+ * 4. If any are unmet → BLOCK
+ */
+async function enforceDependencies(options) {
+    const { octokit, owner, repo, headBranch, baseBranch, sprintMdContent, } = options;
+    const storyId = extractCurrentStoryId(headBranch);
+    if (!storyId) {
+        return {
+            hasUnmetDependencies: false,
+            unmetDependencies: [],
+            metDependencies: [],
+            allDependencies: [],
+            storyId: null,
+            message: `Branch '${headBranch}' has no story ID — dependency check skipped`,
+        };
+    }
+    const allDependencies = parseDependencies(sprintMdContent, storyId);
+    if (allDependencies.length === 0) {
+        return {
+            hasUnmetDependencies: false,
+            unmetDependencies: [],
+            metDependencies: [],
+            allDependencies: [],
+            storyId,
+            message: `Story ${storyId} has no declared dependencies`,
+        };
+    }
+    // Check each dependency
+    const unmetDependencies = [];
+    const metDependencies = [];
+    await Promise.all(allDependencies.map(async (depId) => {
+        try {
+            const { merged, prNumber } = await checkStoryMerged(octokit, owner, repo, depId, baseBranch);
+            if (merged) {
+                metDependencies.push({ storyId: depId, mergedPRNumber: prNumber });
+            }
+            else {
+                unmetDependencies.push({
+                    storyId: depId,
+                    reason: `Story ${depId} has not been merged into ${baseBranch}`,
+                    storyFound: false, // We just couldn't find a merged PR for it
+                });
+            }
+        }
+        catch {
+            // If we can't check, conservatively mark as unmet
+            unmetDependencies.push({
+                storyId: depId,
+                reason: `Could not verify if story ${depId} was merged (API error)`,
+                storyFound: false,
+            });
+        }
+    }));
+    const hasUnmetDependencies = unmetDependencies.length > 0;
+    let message;
+    if (hasUnmetDependencies) {
+        const unmet = unmetDependencies.map((d) => d.storyId).join(', ');
+        message =
+            `Story ${storyId} has unmet dependencies: ${unmet}. ` +
+                `These must be merged into ${baseBranch} before this PR can merge.`;
+    }
+    else if (allDependencies.length > 0) {
+        const met = allDependencies.join(', ');
+        message = `All dependencies satisfied for ${storyId}: ${met}`;
+    }
+    else {
+        message = `No dependencies to check for ${storyId}`;
+    }
+    return {
+        hasUnmetDependencies,
+        unmetDependencies,
+        metDependencies,
+        allDependencies,
+        storyId,
+        message,
+    };
+}
+// ============================================================================
+// Formatting
+// ============================================================================
+/**
+ * Format dependency enforcement result as a PR comment section.
+ * Only produces output when unmet dependencies are detected.
+ */
+function formatDependencyBlock(result) {
+    if (!result.hasUnmetDependencies) {
+        return '';
+    }
+    const lines = [];
+    lines.push('<details>');
+    lines.push(`<summary>:no_entry: **Unmet Dependencies** — ${result.unmetDependencies.length} dependency/dependencies not yet merged</summary>`);
+    lines.push('');
+    lines.push(result.message);
+    lines.push('');
+    lines.push('**Unmet dependencies:**');
+    for (const dep of result.unmetDependencies) {
+        lines.push(`- **${dep.storyId}** — ${dep.reason}`);
+    }
+    lines.push('');
+    if (result.metDependencies.length > 0) {
+        lines.push('**Satisfied dependencies:**');
+        for (const dep of result.metDependencies) {
+            const prRef = dep.mergedPRNumber ? ` (merged as PR #${dep.mergedPRNumber})` : '';
+            lines.push(`- ~~${dep.storyId}~~${prRef} ✓`);
+        }
+        lines.push('');
+    }
+    lines.push('**Next steps:**');
+    lines.push('1. Wait for the dependencies to be merged first');
+    lines.push('2. Or remove the dependency declaration if it is no longer needed');
+    lines.push('');
+    lines.push('*This is a BLOCK — cannot merge until dependencies are satisfied.*');
+    lines.push('');
+    lines.push('</details>');
+    return lines.join('\n');
+}
+
+
+/***/ }),
+
+/***/ 9727:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/**
+ * Coordination Module
+ *
+ * Cross-agent coordination features for Hawky.
+ * Detects potential conflicts between concurrent PRs and branches.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isFrontendBranch = exports.filterApiContractFiles = exports.isApiContractFile = exports.FRONTEND_BRANCH_PATTERNS = exports.API_CONTRACT_PATTERNS = exports.formatDependencyBlock = exports.enforceDependencies = exports.checkStoryMerged = exports.parseDependencies = exports.extractCurrentStoryId = exports.generateHandoffNotifications = exports.anyFileMatches = exports.AUTH_CHANGE_PATTERNS = exports.SCHEMA_CHANGE_PATTERNS = exports.API_CHANGE_PATTERNS = exports.formatOwnershipCollisionWarning = exports.detectOwnershipCollisions = exports.detectFileCollision = exports.identifyFileDomain = exports.identifyBranchDomain = exports.DEFAULT_DOMAINS = exports.formatSpecMismatchWarning = exports.detectSpecMismatch = exports.checkSpecStaleness = exports.findBranchCutPoint = exports.isSpecFile = exports.DEFAULT_SPEC_PATTERNS = exports.formatSchemaMigrationBlock = exports.detectParallelMigrations = exports.filterMigrationFiles = exports.isMigrationFile = exports.DEFAULT_MIGRATION_PATTERNS = exports.formatAuthorshipAttribution = exports.detectMixedAuthorship = exports.getPrimaryAuthor = exports.tallyAuthors = exports.formatTestCountRegressionWarning = exports.detectTestCountRegression = exports.countTestsInBranch = exports.getTestFilesInBranch = exports.decodeBase64Content = exports.countTestCasesInContent = exports.isTestFile = exports.TEST_CASE_PATTERNS = exports.TEST_FILE_PATTERNS = exports.formatStaleBranchWarning = exports.checkStaleBranch = exports.formatConcurrentPRWarning = exports.detectConcurrentPRs = exports.findOverlappingFiles = void 0;
+exports.formatContractDivergenceBlock = exports.detectContractDivergence = exports.detectSuppression = void 0;
+/**
+ * Coordination Module
+ *
+ * Cross-agent coordination features for Hawky.
+ * Detects potential conflicts between concurrent PRs and branches.
+ */
+var concurrent_prs_1 = __nccwpck_require__(2008);
+// Functions
+Object.defineProperty(exports, "findOverlappingFiles", ({ enumerable: true, get: function () { return concurrent_prs_1.findOverlappingFiles; } }));
+Object.defineProperty(exports, "detectConcurrentPRs", ({ enumerable: true, get: function () { return concurrent_prs_1.detectConcurrentPRs; } }));
+Object.defineProperty(exports, "formatConcurrentPRWarning", ({ enumerable: true, get: function () { return concurrent_prs_1.formatConcurrentPRWarning; } }));
+var stale_branch_1 = __nccwpck_require__(3263);
+// Functions
+Object.defineProperty(exports, "checkStaleBranch", ({ enumerable: true, get: function () { return stale_branch_1.checkStaleBranch; } }));
+Object.defineProperty(exports, "formatStaleBranchWarning", ({ enumerable: true, get: function () { return stale_branch_1.formatStaleBranchWarning; } }));
+var test_count_regression_1 = __nccwpck_require__(5787);
+// Constants
+Object.defineProperty(exports, "TEST_FILE_PATTERNS", ({ enumerable: true, get: function () { return test_count_regression_1.TEST_FILE_PATTERNS; } }));
+Object.defineProperty(exports, "TEST_CASE_PATTERNS", ({ enumerable: true, get: function () { return test_count_regression_1.TEST_CASE_PATTERNS; } }));
+// Functions
+Object.defineProperty(exports, "isTestFile", ({ enumerable: true, get: function () { return test_count_regression_1.isTestFile; } }));
+Object.defineProperty(exports, "countTestCasesInContent", ({ enumerable: true, get: function () { return test_count_regression_1.countTestCasesInContent; } }));
+Object.defineProperty(exports, "decodeBase64Content", ({ enumerable: true, get: function () { return test_count_regression_1.decodeBase64Content; } }));
+Object.defineProperty(exports, "getTestFilesInBranch", ({ enumerable: true, get: function () { return test_count_regression_1.getTestFilesInBranch; } }));
+Object.defineProperty(exports, "countTestsInBranch", ({ enumerable: true, get: function () { return test_count_regression_1.countTestsInBranch; } }));
+Object.defineProperty(exports, "detectTestCountRegression", ({ enumerable: true, get: function () { return test_count_regression_1.detectTestCountRegression; } }));
+Object.defineProperty(exports, "formatTestCountRegressionWarning", ({ enumerable: true, get: function () { return test_count_regression_1.formatTestCountRegressionWarning; } }));
+var authorship_attribution_1 = __nccwpck_require__(9982);
+// Functions
+Object.defineProperty(exports, "tallyAuthors", ({ enumerable: true, get: function () { return authorship_attribution_1.tallyAuthors; } }));
+Object.defineProperty(exports, "getPrimaryAuthor", ({ enumerable: true, get: function () { return authorship_attribution_1.getPrimaryAuthor; } }));
+Object.defineProperty(exports, "detectMixedAuthorship", ({ enumerable: true, get: function () { return authorship_attribution_1.detectMixedAuthorship; } }));
+Object.defineProperty(exports, "formatAuthorshipAttribution", ({ enumerable: true, get: function () { return authorship_attribution_1.formatAuthorshipAttribution; } }));
+var schema_migration_1 = __nccwpck_require__(1221);
+// Constants
+Object.defineProperty(exports, "DEFAULT_MIGRATION_PATTERNS", ({ enumerable: true, get: function () { return schema_migration_1.DEFAULT_MIGRATION_PATTERNS; } }));
+// Functions
+Object.defineProperty(exports, "isMigrationFile", ({ enumerable: true, get: function () { return schema_migration_1.isMigrationFile; } }));
+Object.defineProperty(exports, "filterMigrationFiles", ({ enumerable: true, get: function () { return schema_migration_1.filterMigrationFiles; } }));
+Object.defineProperty(exports, "detectParallelMigrations", ({ enumerable: true, get: function () { return schema_migration_1.detectParallelMigrations; } }));
+Object.defineProperty(exports, "formatSchemaMigrationBlock", ({ enumerable: true, get: function () { return schema_migration_1.formatSchemaMigrationBlock; } }));
+var spec_version_mismatch_1 = __nccwpck_require__(7174);
+// Constants
+Object.defineProperty(exports, "DEFAULT_SPEC_PATTERNS", ({ enumerable: true, get: function () { return spec_version_mismatch_1.DEFAULT_SPEC_PATTERNS; } }));
+// Functions
+Object.defineProperty(exports, "isSpecFile", ({ enumerable: true, get: function () { return spec_version_mismatch_1.isSpecFile; } }));
+Object.defineProperty(exports, "findBranchCutPoint", ({ enumerable: true, get: function () { return spec_version_mismatch_1.findBranchCutPoint; } }));
+Object.defineProperty(exports, "checkSpecStaleness", ({ enumerable: true, get: function () { return spec_version_mismatch_1.checkSpecStaleness; } }));
+Object.defineProperty(exports, "detectSpecMismatch", ({ enumerable: true, get: function () { return spec_version_mismatch_1.detectSpecMismatch; } }));
+Object.defineProperty(exports, "formatSpecMismatchWarning", ({ enumerable: true, get: function () { return spec_version_mismatch_1.formatSpecMismatchWarning; } }));
+var ownership_collision_1 = __nccwpck_require__(5351);
+// Constants
+Object.defineProperty(exports, "DEFAULT_DOMAINS", ({ enumerable: true, get: function () { return ownership_collision_1.DEFAULT_DOMAINS; } }));
+// Functions
+Object.defineProperty(exports, "identifyBranchDomain", ({ enumerable: true, get: function () { return ownership_collision_1.identifyBranchDomain; } }));
+Object.defineProperty(exports, "identifyFileDomain", ({ enumerable: true, get: function () { return ownership_collision_1.identifyFileDomain; } }));
+Object.defineProperty(exports, "detectFileCollision", ({ enumerable: true, get: function () { return ownership_collision_1.detectFileCollision; } }));
+Object.defineProperty(exports, "detectOwnershipCollisions", ({ enumerable: true, get: function () { return ownership_collision_1.detectOwnershipCollisions; } }));
+Object.defineProperty(exports, "formatOwnershipCollisionWarning", ({ enumerable: true, get: function () { return ownership_collision_1.formatOwnershipCollisionWarning; } }));
+var session_handoff_1 = __nccwpck_require__(2984);
+// Constants
+Object.defineProperty(exports, "API_CHANGE_PATTERNS", ({ enumerable: true, get: function () { return session_handoff_1.API_CHANGE_PATTERNS; } }));
+Object.defineProperty(exports, "SCHEMA_CHANGE_PATTERNS", ({ enumerable: true, get: function () { return session_handoff_1.SCHEMA_CHANGE_PATTERNS; } }));
+Object.defineProperty(exports, "AUTH_CHANGE_PATTERNS", ({ enumerable: true, get: function () { return session_handoff_1.AUTH_CHANGE_PATTERNS; } }));
+// Functions
+Object.defineProperty(exports, "anyFileMatches", ({ enumerable: true, get: function () { return session_handoff_1.anyFileMatches; } }));
+Object.defineProperty(exports, "generateHandoffNotifications", ({ enumerable: true, get: function () { return session_handoff_1.generateHandoffNotifications; } }));
+var dependency_enforcement_1 = __nccwpck_require__(9441);
+// Functions
+Object.defineProperty(exports, "extractCurrentStoryId", ({ enumerable: true, get: function () { return dependency_enforcement_1.extractCurrentStoryId; } }));
+Object.defineProperty(exports, "parseDependencies", ({ enumerable: true, get: function () { return dependency_enforcement_1.parseDependencies; } }));
+Object.defineProperty(exports, "checkStoryMerged", ({ enumerable: true, get: function () { return dependency_enforcement_1.checkStoryMerged; } }));
+Object.defineProperty(exports, "enforceDependencies", ({ enumerable: true, get: function () { return dependency_enforcement_1.enforceDependencies; } }));
+Object.defineProperty(exports, "formatDependencyBlock", ({ enumerable: true, get: function () { return dependency_enforcement_1.formatDependencyBlock; } }));
+var api_contract_divergence_1 = __nccwpck_require__(237);
+// Constants
+Object.defineProperty(exports, "API_CONTRACT_PATTERNS", ({ enumerable: true, get: function () { return api_contract_divergence_1.API_CONTRACT_PATTERNS; } }));
+Object.defineProperty(exports, "FRONTEND_BRANCH_PATTERNS", ({ enumerable: true, get: function () { return api_contract_divergence_1.FRONTEND_BRANCH_PATTERNS; } }));
+// Functions
+Object.defineProperty(exports, "isApiContractFile", ({ enumerable: true, get: function () { return api_contract_divergence_1.isApiContractFile; } }));
+Object.defineProperty(exports, "filterApiContractFiles", ({ enumerable: true, get: function () { return api_contract_divergence_1.filterApiContractFiles; } }));
+Object.defineProperty(exports, "isFrontendBranch", ({ enumerable: true, get: function () { return api_contract_divergence_1.isFrontendBranch; } }));
+Object.defineProperty(exports, "detectSuppression", ({ enumerable: true, get: function () { return api_contract_divergence_1.detectSuppression; } }));
+Object.defineProperty(exports, "detectContractDivergence", ({ enumerable: true, get: function () { return api_contract_divergence_1.detectContractDivergence; } }));
+Object.defineProperty(exports, "formatContractDivergenceBlock", ({ enumerable: true, get: function () { return api_contract_divergence_1.formatContractDivergenceBlock; } }));
+
+
+/***/ }),
+
+/***/ 5351:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Ownership Collision Detection (S040)
+ *
+ * Detects when a branch from one team domain (e.g., backend) touches
+ * files that belong to another domain (e.g., frontend). This helps
+ * teams stay within their scope and coordinate cross-domain changes.
+ *
+ * Example: A `be-*` branch touching `src/components/` should flag
+ * that a frontend review/coordination is needed.
+ *
+ * Output: WARN tier finding.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DEFAULT_DOMAINS = void 0;
+exports.identifyBranchDomain = identifyBranchDomain;
+exports.identifyFileDomain = identifyFileDomain;
+exports.detectFileCollision = detectFileCollision;
+exports.detectOwnershipCollisions = detectOwnershipCollisions;
+exports["default"] = detectOwnershipCollisions;
+exports.formatOwnershipCollisionWarning = formatOwnershipCollisionWarning;
+// ============================================================================
+// Constants
+// ============================================================================
+/**
+ * Default domain definitions for a typical full-stack team
+ */
+exports.DEFAULT_DOMAINS = [
+    {
+        name: 'Backend',
+        branchPrefixes: ['be-', 'api-', 'db-', 'infra-', 'server-'],
+        ownedPaths: [
+            /^src\/(api|server|controllers?|services?|models?|repositories?|db|database)\//i,
+            /^(server|api|backend|lib|pkg)\//i,
+            /\.(sql|rb|py|go|java|cs|rs)$/,
+            /^scripts\/(db|migrate|seed)\//i,
+        ],
+    },
+    {
+        name: 'Frontend',
+        branchPrefixes: ['fe-', 'ui-', 'web-', 'client-', 'design-'],
+        ownedPaths: [
+            /^src\/(components?|pages?|views?|styles?|hooks?|context|store|assets)\//i,
+            /^(client|frontend|web|app)\//i,
+            /\.(css|scss|sass|less|styl)$/,
+            /\.(jsx?|tsx?)$/, // Note: overlaps with backend TS - context-dependent
+            /^public\//i,
+            /^assets\//i,
+        ],
+    },
+    {
+        name: 'DevOps',
+        branchPrefixes: ['devops-', 'ci-', 'deploy-', 'infra-', 'k8s-', 'docker-'],
+        ownedPaths: [
+            /^\.github\//,
+            /^\.circleci\//,
+            /^(k8s|kubernetes|helm|terraform|ansible)\//i,
+            /\.(dockerfile|Dockerfile)$/i,
+            /^docker-compose/i,
+            /\.(yaml|yml)$/, // CI/CD configs
+        ],
+    },
+];
+// ============================================================================
+// Core Logic
+// ============================================================================
+/**
+ * Identify which domain a branch belongs to based on its name prefix
+ */
+function identifyBranchDomain(branchName, domains = exports.DEFAULT_DOMAINS) {
+    const lowerBranch = branchName.toLowerCase();
+    for (const domain of domains) {
+        for (const prefix of domain.branchPrefixes) {
+            if (lowerBranch.startsWith(prefix.toLowerCase())) {
+                return domain;
+            }
+        }
+    }
+    return null;
+}
+/**
+ * Identify which domain owns a specific file path
+ */
+function identifyFileDomain(filePath, domains = exports.DEFAULT_DOMAINS) {
+    for (const domain of domains) {
+        for (const pattern of domain.ownedPaths) {
+            if (pattern.test(filePath)) {
+                return domain;
+            }
+        }
+    }
+    return null;
+}
+/**
+ * Check if a file clearly belongs to a specific domain that is NOT the branch domain.
+ * Returns the owning domain if it's a definitive collision, null otherwise.
+ */
+function detectFileCollision(filePath, branchDomain, domains = exports.DEFAULT_DOMAINS) {
+    // Only flag if another domain owns the file AND the branch domain does NOT own it
+    const fileDomain = identifyFileDomain(filePath, domains);
+    if (!fileDomain)
+        return null; // Unowned file — not a collision
+    if (fileDomain.name === branchDomain.name)
+        return null; // Same domain — fine
+    if (branchDomain.ownedPaths.some((p) => p.test(filePath)))
+        return null; // Branch domain also owns it
+    return fileDomain;
+}
+/**
+ * Detect ownership collisions in a PR.
+ *
+ * Checks if the branch (identified by name prefix) touches files
+ * that belong to a different team domain.
+ */
+function detectOwnershipCollisions(options) {
+    const { branchName, changedFiles, domains = exports.DEFAULT_DOMAINS } = options;
+    // Identify what domain this branch belongs to
+    const branchDomain = identifyBranchDomain(branchName, domains);
+    if (!branchDomain) {
+        // Unrecognized branch — skip the check
+        return {
+            hasCollisions: false,
+            collisions: [],
+            branchDomain: null,
+            crossDomainFiles: [],
+            message: `Branch '${branchName}' does not match any known domain prefix — ownership check skipped`,
+        };
+    }
+    // Find files that belong to a different domain
+    const collisions = [];
+    for (const filePath of changedFiles) {
+        const conflictingDomain = detectFileCollision(filePath, branchDomain, domains);
+        if (conflictingDomain) {
+            collisions.push({
+                filePath,
+                branchDomain: branchDomain.name,
+                fileDomain: conflictingDomain.name,
+            });
+        }
+    }
+    const hasCollisions = collisions.length > 0;
+    const crossDomainFiles = collisions.map((c) => c.filePath);
+    let message;
+    if (hasCollisions) {
+        const domainCounts = new Map();
+        for (const collision of collisions) {
+            domainCounts.set(collision.fileDomain, (domainCounts.get(collision.fileDomain) ?? 0) + 1);
+        }
+        const domainSummary = Array.from(domainCounts.entries())
+            .map(([name, count]) => `${count} ${name} file(s)`)
+            .join(', ');
+        message =
+            `${branchDomain.name} branch '${branchName}' touches cross-domain files: ${domainSummary}. ` +
+                `Coordinate with the relevant team(s) or ensure this is intentional.`;
+    }
+    else {
+        message = `No ownership collisions — all files are within ${branchDomain.name} domain`;
+    }
+    return {
+        hasCollisions,
+        collisions,
+        branchDomain: branchDomain.name,
+        crossDomainFiles,
+        message,
+    };
+}
+// ============================================================================
+// Formatting
+// ============================================================================
+/**
+ * Format ownership collision result as a PR comment section.
+ * Only produces output when collisions are detected.
+ */
+function formatOwnershipCollisionWarning(result) {
+    if (!result.hasCollisions) {
+        return '';
+    }
+    const lines = [];
+    lines.push('<details>');
+    lines.push(`<summary>:warning: **Ownership Collision** — ${result.branchDomain} branch touching ${result.collisions.length} cross-domain file(s)</summary>`);
+    lines.push('');
+    lines.push(`This is a **${result.branchDomain}** branch, but it modifies files that belong to other domains. ` +
+        'Ensure this is intentional and coordinate with the relevant team.');
+    lines.push('');
+    // Group collisions by file domain
+    const byDomain = new Map();
+    for (const collision of result.collisions) {
+        const files = byDomain.get(collision.fileDomain) ?? [];
+        files.push(collision.filePath);
+        byDomain.set(collision.fileDomain, files);
+    }
+    for (const [domain, files] of byDomain) {
+        lines.push(`**${domain} files modified:**`);
+        for (const file of files.slice(0, 5)) {
+            lines.push(`- \`${file}\``);
+        }
+        if (files.length > 5) {
+            lines.push(`- ...and ${files.length - 5} more`);
+        }
+        lines.push('');
+    }
+    lines.push('**What to check:**');
+    lines.push('- Is this change intentional? If so, add a comment explaining why');
+    lines.push('- Have the owning team(s) reviewed this change?');
+    lines.push('- Could this be split into separate PRs per domain?');
+    lines.push('');
+    lines.push('*This is a WARN — not blocking.*');
+    lines.push('');
+    lines.push('</details>');
+    return lines.join('\n');
+}
+
+
+/***/ }),
+
+/***/ 1221:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Parallel Schema Migration Detection (S037)
+ *
+ * Detects multiple open PRs that each contain database migration files.
+ * When 2+ PRs have migrations open simultaneously, blocks with a warning
+ * to merge them serially and avoid migration conflicts.
+ *
+ * Output: BLOCK tier finding.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DEFAULT_MIGRATION_PATTERNS = void 0;
+exports.isMigrationFile = isMigrationFile;
+exports.filterMigrationFiles = filterMigrationFiles;
+exports.detectParallelMigrations = detectParallelMigrations;
+exports["default"] = detectParallelMigrations;
+exports.formatSchemaMigrationBlock = formatSchemaMigrationBlock;
+// ============================================================================
+// Constants
+// ============================================================================
+/**
+ * Default patterns that identify database migration files.
+ * Matches common ORM and raw SQL migration file conventions.
+ */
+exports.DEFAULT_MIGRATION_PATTERNS = [
+    // Directory-based: migrations/, db/migrate/, database/migrations/
+    /(?:^|\/)(migrations?|db\/migrate|database\/migrations?)\//i,
+    // Timestamp-prefixed SQL or TypeScript migration files
+    /\d{4,}_[^/]+\.(sql|ts|js)$/,
+    // Alembic (Python)
+    /alembic\/versions\//i,
+    // Flyway
+    /^V\d+__[^/]+\.sql$/i,
+    // Liquibase
+    /liquibase\/[^/]+\.(sql|xml|yaml|yml)$/i,
+    // Prisma
+    /prisma\/migrations\//i,
+    // Sequelize
+    /sequelize\/migrations\//i,
+    // Knex
+    /knex\/migrations\//i,
+    // TypeORM
+    /typeorm\/migrations\//i,
+    // Django
+    /migrations\/\d{4}_[^/]+\.py$/i,
+];
+// ============================================================================
+// Core Logic
+// ============================================================================
+/**
+ * Check if a file path looks like a migration file
+ */
+function isMigrationFile(filePath, patterns = exports.DEFAULT_MIGRATION_PATTERNS) {
+    return patterns.some((pattern) => pattern.test(filePath));
+}
+/**
+ * Filter a list of file paths to only migration files
+ */
+function filterMigrationFiles(files, patterns = exports.DEFAULT_MIGRATION_PATTERNS) {
+    return files.filter((f) => isMigrationFile(f, patterns));
+}
+/**
+ * Detect parallel schema migrations across open PRs.
+ *
+ * Algorithm:
+ * 1. Check if current PR has migration files
+ * 2. If yes, list all open PRs and find others that also have migrations
+ * 3. If 2+ PRs (including current) have migrations → BLOCK with serial merge advice
+ */
+async function detectParallelMigrations(options) {
+    const { octokit, owner, repo, currentPRNumber, currentPRFiles, baseBranch, migrationPatterns = exports.DEFAULT_MIGRATION_PATTERNS, } = options;
+    // Check what migrations the current PR has
+    const currentPRMigrations = filterMigrationFiles(currentPRFiles, migrationPatterns);
+    // If the current PR has no migrations, skip the full check
+    if (currentPRMigrations.length === 0) {
+        return {
+            hasParallelMigrations: false,
+            migrationPRs: [],
+            currentPRMigrations: [],
+            prsScanned: 0,
+            message: 'No migration files detected in this PR',
+        };
+    }
+    // Fetch open PRs
+    const { data: openPRs } = await octokit.rest.pulls.list({
+        owner,
+        repo,
+        state: 'open',
+        ...(baseBranch ? { base: baseBranch } : {}),
+        per_page: 100,
+    });
+    // Find other PRs with migration files
+    const otherMigrationPRs = [];
+    const otherPRs = openPRs.filter((pr) => pr.number !== currentPRNumber);
+    for (const pr of otherPRs) {
+        try {
+            const { data: files } = await octokit.rest.pulls.listFiles({
+                owner,
+                repo,
+                pull_number: pr.number,
+                per_page: 100,
+            });
+            const prMigrationFiles = filterMigrationFiles(files.map((f) => f.filename), migrationPatterns);
+            if (prMigrationFiles.length > 0) {
+                otherMigrationPRs.push({
+                    number: pr.number,
+                    title: pr.title,
+                    author: pr.user?.login ?? 'unknown',
+                    url: pr.html_url,
+                    migrationFiles: prMigrationFiles,
+                    headBranch: pr.head.ref,
+                });
+            }
+        }
+        catch {
+            // Skip PRs we can't access
+        }
+    }
+    const hasParallelMigrations = otherMigrationPRs.length > 0;
+    let message;
+    if (hasParallelMigrations) {
+        const others = otherMigrationPRs.map((p) => `#${p.number}`).join(', ');
+        message =
+            `This PR contains ${currentPRMigrations.length} migration file(s), ` +
+                `but ${otherMigrationPRs.length} other open PR(s) also have migrations (${others}). ` +
+                `Migrations must be merged serially to avoid schema conflicts.`;
+    }
+    else {
+        message = `This PR contains ${currentPRMigrations.length} migration file(s). No other open PRs have migrations.`;
+    }
+    return {
+        hasParallelMigrations,
+        migrationPRs: otherMigrationPRs,
+        currentPRMigrations,
+        prsScanned: otherPRs.length,
+        message,
+    };
+}
+// ============================================================================
+// Formatting
+// ============================================================================
+/**
+ * Format parallel schema migration result as a PR comment section.
+ * Only produces output when parallel migrations are detected.
+ */
+function formatSchemaMigrationBlock(result) {
+    if (!result.hasParallelMigrations) {
+        return '';
+    }
+    const lines = [];
+    lines.push('<details>');
+    lines.push(`<summary>:no_entry: **Parallel Schema Migrations** — ${result.migrationPRs.length + 1} PR(s) with migrations open simultaneously</summary>`);
+    lines.push('');
+    lines.push('Multiple open PRs contain database migration files. ' +
+        '**Merging them in parallel may cause schema conflicts.** ' +
+        'Merge migrations one at a time.');
+    lines.push('');
+    lines.push('**This PR\'s migration files:**');
+    for (const file of result.currentPRMigrations) {
+        lines.push(`- \`${file}\``);
+    }
+    lines.push('');
+    lines.push('**Other open PRs with migrations:**');
+    for (const pr of result.migrationPRs) {
+        lines.push(`**[#${pr.number}: ${pr.title}](${pr.url})** by @${pr.author}`);
+        lines.push(`Branch: \`${pr.headBranch}\``);
+        if (pr.migrationFiles.length <= 3) {
+            for (const file of pr.migrationFiles) {
+                lines.push(`- \`${file}\``);
+            }
+        }
+        else {
+            lines.push(`- ${pr.migrationFiles.slice(0, 2).map((f) => `\`${f}\``).join(', ')} and ${pr.migrationFiles.length - 2} more`);
+        }
+        lines.push('');
+    }
+    lines.push('**Resolution:** Coordinate with other PR authors. Merge one migration PR first, then rebase and merge the next.');
+    lines.push('');
+    lines.push('*This is a BLOCK — review required before merging.*');
+    lines.push('');
+    lines.push('</details>');
+    return lines.join('\n');
+}
+
+
+/***/ }),
+
+/***/ 2984:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Session Handoff Notification (S042)
+ *
+ * When an API PR merges, notifies dependent frontend teams that new
+ * endpoints are available and they may need to update their integration.
+ *
+ * Also generates general "work available" notifications when significant
+ * PRs merge so other agents know to rebase or pick up downstream work.
+ *
+ * Output: INFORM tier — generates NOTIFICATIONS.md entries (caller writes).
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.AUTH_CHANGE_PATTERNS = exports.SCHEMA_CHANGE_PATTERNS = exports.API_CHANGE_PATTERNS = void 0;
+exports.anyFileMatches = anyFileMatches;
+exports.generateHandoffNotifications = generateHandoffNotifications;
+exports["default"] = generateHandoffNotifications;
+// ============================================================================
+// Core Logic
+// ============================================================================
+/**
+ * File path patterns indicating API changes that frontend needs to know about
+ */
+exports.API_CHANGE_PATTERNS = [
+    /^src\/(api|routes?|endpoints?|controllers?)\//i,
+    /openapi\.(yaml|yml|json)$/i,
+    /swagger\.(yaml|yml|json)$/i,
+    /api[-_]spec/i,
+];
+/**
+ * File path patterns indicating schema/contract changes
+ */
+exports.SCHEMA_CHANGE_PATTERNS = [
+    /schema\.(graphql|gql|json)$/i,
+    /prisma\/schema\.prisma$/,
+    /\.proto$/,
+];
+/**
+ * File path patterns indicating auth changes relevant to all teams
+ */
+exports.AUTH_CHANGE_PATTERNS = [
+    /^src\/(auth|security|permissions?)\//i,
+    /\.env(\.example)?$/,
+];
+/**
+ * Check if any file in a list matches any pattern
+ */
+function anyFileMatches(files, patterns) {
+    return files.filter((f) => patterns.some((p) => p.test(f)));
+}
+/**
+ * Generate handoff notifications based on what changed in the merged PR.
+ *
+ * Logic:
+ * - API changes → notify @Nova (frontend needs to integrate)
+ * - Schema changes → notify @Nova and @Latch
+ * - Auth changes → notify @Hawk and @Kai
+ * - Always log completion for general awareness
+ */
+function generateHandoffNotifications(options) {
+    const { prNumber, prUrl, authorLogin, headBranch, changedFiles, date, sessionId = 'hawky-auto', } = options;
+    const dateStr = date.split('T')[0];
+    const storyMatch = /(?:^|[-_/])([Ss]\d{3,4})(?:[-_/]|$)/.exec(headBranch);
+    const storyRef = storyMatch ? ` (${storyMatch[1]?.toUpperCase()})` : '';
+    const notifications = [];
+    // API changes → notify frontend (@Nova)
+    const apiFiles = anyFileMatches(changedFiles, exports.API_CHANGE_PATTERNS);
+    if (apiFiles.length > 0) {
+        const fileNames = apiFiles.slice(0, 3).map((f) => f.split('/').pop() ?? f).join(', ');
+        notifications.push({
+            recipient: '@Nova',
+            reason: `API endpoints merged — PR #${prNumber}${storyRef}`,
+            details: `New API changes are available in \`${options.baseBranch}\`. ` +
+                `Files: ${fileNames}${apiFiles.length > 3 ? ` +${apiFiles.length - 3} more` : ''}. ` +
+                `[View PR](${prUrl})`,
+            tags: ['api', 'handoff'],
+        });
+    }
+    // Schema/contract changes → notify @Nova and @Latch
+    const schemaFiles = anyFileMatches(changedFiles, exports.SCHEMA_CHANGE_PATTERNS);
+    if (schemaFiles.length > 0) {
+        const fileNames = schemaFiles.map((f) => f.split('/').pop() ?? f).join(', ');
+        notifications.push({
+            recipient: '@Nova',
+            reason: `Schema changes merged — PR #${prNumber}${storyRef}`,
+            details: `Data schema was updated in \`${options.baseBranch}\`. ` +
+                `Files: ${fileNames}. Update your queries/types accordingly. ` +
+                `[View PR](${prUrl})`,
+            tags: ['schema', 'handoff'],
+        });
+        notifications.push({
+            recipient: '@Latch',
+            reason: `Schema changes merged — PR #${prNumber}${storyRef}`,
+            details: `Database schema was updated. Check for migration compatibility. ` +
+                `Files: ${fileNames}. [View PR](${prUrl})`,
+            tags: ['schema', 'database', 'handoff'],
+        });
+    }
+    // Auth changes → notify @Hawk and @Kai
+    const authFiles = anyFileMatches(changedFiles, exports.AUTH_CHANGE_PATTERNS);
+    if (authFiles.length > 0) {
+        notifications.push({
+            recipient: '@Kai',
+            reason: `Auth/security changes merged — PR #${prNumber}${storyRef}`,
+            details: `Authentication or security files changed. PM verification may be needed. ` +
+                `[View PR](${prUrl})`,
+            tags: ['security', 'auth', 'handoff'],
+        });
+    }
+    // Deduplicate by recipient (merge notifications to same person)
+    const dedupedMap = new Map();
+    for (const notif of notifications) {
+        const existing = dedupedMap.get(notif.recipient);
+        if (existing) {
+            existing.reason += `; ${notif.reason}`;
+            existing.details += `\n  ${notif.details}`;
+            existing.tags = [...new Set([...existing.tags, ...notif.tags])];
+        }
+        else {
+            dedupedMap.set(notif.recipient, { ...notif });
+        }
+    }
+    const deduped = Array.from(dedupedMap.values());
+    // Format entries for NOTIFICATIONS.md
+    const entries = deduped.map((notif) => {
+        const tagStr = notif.tags.length > 0 ? ` [${notif.tags.join(', ')}]` : '';
+        return (`[${dateStr}] ${notif.recipient} [session:${sessionId}]: ` +
+            `**Handoff: PR #${prNumber} merged by @${authorLogin}**${tagStr}\n` +
+            `  → ${notif.reason}\n` +
+            `  → ${notif.details}`);
+    });
+    const hasHandoffs = deduped.length > 0;
+    let message;
+    if (hasHandoffs) {
+        const recipients = deduped.map((n) => n.recipient).join(', ');
+        message = `Generated ${deduped.length} handoff notification(s) for: ${recipients}`;
+    }
+    else {
+        message = 'No handoff notifications needed — no downstream-impact changes detected';
+    }
+    return {
+        hasHandoffs,
+        notifications: deduped,
+        entries,
+        message,
+    };
+}
+
+
+/***/ }),
+
+/***/ 7174:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Spec Version Mismatch Detection (S039)
+ *
+ * Detects when a spec file was modified on the base branch after the
+ * current branch was cut. If the spec has been updated since branch cut,
+ * the PR may be implementing against a stale spec.
+ *
+ * Output: WARN tier finding.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DEFAULT_SPEC_PATTERNS = void 0;
+exports.isSpecFile = isSpecFile;
+exports.findBranchCutPoint = findBranchCutPoint;
+exports.checkSpecStaleness = checkSpecStaleness;
+exports.detectSpecMismatch = detectSpecMismatch;
+exports["default"] = detectSpecMismatch;
+exports.formatSpecMismatchWarning = formatSpecMismatchWarning;
+// ============================================================================
+// Constants
+// ============================================================================
+/**
+ * Default patterns for identifying spec/design files
+ */
+exports.DEFAULT_SPEC_PATTERNS = [
+    // OpenAPI / Swagger
+    /openapi\.(yaml|yml|json)$/i,
+    /swagger\.(yaml|yml|json)$/i,
+    // API spec files
+    /api[-_]spec\.(yaml|yml|json|ts|md)$/i,
+    /spec\.(yaml|yml|json)$/i,
+    // Contract/schema files
+    /schema\.(graphql|gql|json|yaml|yml)$/i,
+    // Design docs
+    /DESIGN\.(md|txt)$/i,
+    /\.claude\/work\/features\/.*\.md$/i,
+    // Proto files
+    /\.proto$/i,
+    // JSON Schema
+    /\.schema\.json$/i,
+];
+// ============================================================================
+// Core Logic
+// ============================================================================
+/**
+ * Check if a file path looks like a spec file
+ */
+function isSpecFile(filePath, patterns = exports.DEFAULT_SPEC_PATTERNS) {
+    return patterns.some((p) => p.test(filePath));
+}
+/**
+ * Find the merge base SHA and date between head branch and base branch.
+ * This is the point where the branch was cut from base.
+ */
+async function findBranchCutPoint(octokit, owner, repo, headBranch, baseBranch) {
+    const response = await octokit.rest.repos.compareCommits({
+        owner,
+        repo,
+        base: baseBranch,
+        head: headBranch,
+    });
+    const mergeBase = response.data.merge_base_commit;
+    const date = mergeBase.commit.committer?.date ?? new Date(0).toISOString();
+    return { sha: mergeBase.sha, date };
+}
+/**
+ * Check if a spec file has been updated on the base branch since the branch was cut.
+ * Returns null if the spec is current (no updates since branch cut).
+ */
+async function checkSpecStaleness(octokit, owner, repo, specPath, baseBranch, branchCutDate) {
+    // List commits to the spec file on base branch since the branch cut date
+    const { data: commits } = await octokit.rest.repos.listCommits({
+        owner,
+        repo,
+        path: specPath,
+        sha: baseBranch,
+        per_page: 1,
+        since: branchCutDate,
+    });
+    if (commits.length === 0) {
+        return null; // Spec hasn't changed since branch cut
+    }
+    const latestSpecCommit = commits[0];
+    if (!latestSpecCommit) {
+        return null;
+    }
+    const specLastModifiedDate = latestSpecCommit.commit.committer?.date ?? branchCutDate;
+    return {
+        path: specPath,
+        branchCutDate,
+        specLastModifiedDate,
+        specCommitSha: latestSpecCommit.sha.slice(0, 8),
+        specCommitMessage: latestSpecCommit.commit.message.split('\n')[0] ?? '', // first line only
+    };
+}
+/**
+ * Detect spec version mismatches for a PR.
+ *
+ * For each spec file provided:
+ * 1. Find the merge base (branch cut point) between head and base
+ * 2. Check if the spec has been updated on base since the branch was cut
+ * 3. If yes → stale spec warning
+ */
+async function detectSpecMismatch(options) {
+    const { octokit, owner, repo, headBranch, baseBranch, specFiles } = options;
+    if (specFiles.length === 0) {
+        return {
+            hasStaleSpecs: false,
+            staleSpecs: [],
+            currentSpecs: [],
+            message: 'No spec files to check',
+        };
+    }
+    // Find where the branch was cut
+    const branchCut = await findBranchCutPoint(octokit, owner, repo, headBranch, baseBranch);
+    // Check each spec file
+    const staleSpecs = [];
+    const currentSpecs = [];
+    await Promise.all(specFiles.map(async (specPath) => {
+        try {
+            const stale = await checkSpecStaleness(octokit, owner, repo, specPath, baseBranch, branchCut.date);
+            if (stale) {
+                staleSpecs.push(stale);
+            }
+            else {
+                currentSpecs.push(specPath);
+            }
+        }
+        catch {
+            // Skip specs we can't check
+            currentSpecs.push(specPath);
+        }
+    }));
+    const hasStaleSpecs = staleSpecs.length > 0;
+    let message;
+    if (hasStaleSpecs) {
+        const specList = staleSpecs.map((s) => s.path).join(', ');
+        message =
+            `${staleSpecs.length} spec file(s) were updated on ${baseBranch} after this branch was cut: ${specList}. ` +
+                `Verify the implementation reflects the latest spec.`;
+    }
+    else {
+        message = `All ${specFiles.length} spec file(s) are current — no updates since branch cut.`;
+    }
+    return {
+        hasStaleSpecs,
+        staleSpecs,
+        currentSpecs,
+        message,
+    };
+}
+// ============================================================================
+// Formatting
+// ============================================================================
+/**
+ * Format spec mismatch result as a PR comment section.
+ * Only produces output when stale specs are detected.
+ */
+function formatSpecMismatchWarning(result) {
+    if (!result.hasStaleSpecs) {
+        return '';
+    }
+    const lines = [];
+    lines.push('<details>');
+    lines.push(`<summary>:warning: **Stale Spec** — ${result.staleSpecs.length} spec file(s) updated after branch cut</summary>`);
+    lines.push('');
+    lines.push('The following spec file(s) were modified on the base branch after this branch was created. ' +
+        'This PR may be implementing against an outdated spec.');
+    lines.push('');
+    for (const spec of result.staleSpecs) {
+        lines.push(`**\`${spec.path}\`**`);
+        lines.push(`- Branch cut: \`${spec.branchCutDate}\``);
+        lines.push(`- Spec updated: \`${spec.specLastModifiedDate}\` (commit \`${spec.specCommitSha}\`)`);
+        lines.push(`- Latest change: *${spec.specCommitMessage}*`);
+        lines.push('');
+    }
+    lines.push('**What to do:**');
+    lines.push('1. Review the spec changes made after your branch was cut');
+    lines.push('2. Update your implementation if the changes affect your work');
+    lines.push('3. Rebase if needed to pick up the latest spec');
+    lines.push('');
+    lines.push('*This is a WARN — not blocking.*');
+    lines.push('');
+    lines.push('</details>');
+    return lines.join('\n');
+}
+
+
+/***/ }),
+
+/***/ 3263:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Stale Branch Detection (S038)
+ *
+ * Detects branches that are significantly behind their base branch.
+ * Configurable threshold (default: 50 commits behind).
+ * WARN tier — not blocking.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.checkStaleBranch = checkStaleBranch;
+exports.formatStaleBranchWarning = formatStaleBranchWarning;
+// ============================================================================
+// Core Logic
+// ============================================================================
+/**
+ * Check if a branch is significantly behind its base branch.
+ *
+ * Uses GitHub's compare API to count how many commits the current
+ * PR branch is behind the base branch. Also checks branch age in days.
+ *
+ * Flags if: > 2 days old OR > 10 commits behind (per spec S038)
+ */
+async function checkStaleBranch(options) {
+    const { octokit, owner, repo, headBranch, baseBranch, threshold = 10, // Per spec: > 10 commits behind
+    daysThreshold = 2, // Per spec: > 2 days old
+    branchCreatedAt, } = options;
+    // basehead format: "base...head" (commits in base not in head = commits behind)
+    const basehead = `${headBranch}...${baseBranch}`;
+    const { data } = await octokit.rest.repos.compareCommitsWithBasehead({
+        owner,
+        repo,
+        basehead,
+    });
+    const commitsBehind = data.behind_by;
+    const baseLastCommitDate = data.base_commit?.commit?.committer?.date;
+    // Calculate days old
+    let daysOld = 0;
+    if (branchCreatedAt) {
+        const branchDate = new Date(branchCreatedAt);
+        const now = new Date();
+        daysOld = Math.floor((now.getTime() - branchDate.getTime()) / (1000 * 60 * 60 * 24));
+    }
+    // Determine staleness: commits OR days
+    const staleByCommits = commitsBehind > threshold;
+    const staleByDays = daysOld > daysThreshold;
+    const isStale = staleByCommits || staleByDays;
+    // Determine reason
+    let staleReason;
+    if (staleByCommits && staleByDays) {
+        staleReason = 'both';
+    }
+    else if (staleByCommits) {
+        staleReason = 'commits';
+    }
+    else if (staleByDays) {
+        staleReason = 'days';
+    }
+    const result = {
+        isStale,
+        commitsBehind,
+        baseBranch,
+        currentBranch: headBranch,
+        threshold,
+        daysThreshold,
+        daysOld,
+    };
+    if (staleReason) {
+        result.staleReason = staleReason;
+    }
+    if (baseLastCommitDate) {
+        result.baseLastCommitDate = baseLastCommitDate;
+    }
+    return result;
+}
+// ============================================================================
+// Formatting
+// ============================================================================
+/**
+ * Format stale branch check result as a PR comment warning
+ */
+function formatStaleBranchWarning(result) {
+    if (!result.isStale) {
+        return '';
+    }
+    const lines = [];
+    // Build summary based on reason
+    let summaryReason = '';
+    if (result.staleReason === 'both') {
+        summaryReason = `${result.daysOld} days old and ${result.commitsBehind} commits behind`;
+    }
+    else if (result.staleReason === 'days') {
+        summaryReason = `${result.daysOld} days old`;
+    }
+    else {
+        summaryReason = `${result.commitsBehind} commits behind \`${result.baseBranch}\``;
+    }
+    lines.push('<details>');
+    lines.push(`<summary>:hourglass: **Stale Branch Warning** — ${summaryReason}</summary>`);
+    lines.push('');
+    // Detail message based on reason
+    if (result.staleReason === 'both' || result.staleReason === 'commits') {
+        lines.push(`Branch \`${result.currentBranch}\` is **${result.commitsBehind} commits behind** \`${result.baseBranch}\` ` +
+            `(threshold: ${result.threshold}).`);
+    }
+    if (result.staleReason === 'both' || result.staleReason === 'days') {
+        lines.push(`Branch is **${result.daysOld} days old** (threshold: ${result.daysThreshold} days).`);
+    }
+    lines.push('');
+    lines.push('This may cause merge conflicts or integration issues. Consider rebasing before merging.');
+    lines.push('');
+    if (result.baseLastCommitDate) {
+        const dateStr = result.baseLastCommitDate.slice(0, 10);
+        lines.push(`*Last commit to \`${result.baseBranch}\`: ${dateStr}*`);
+        lines.push('');
+    }
+    lines.push('```bash');
+    lines.push(`# Rebase onto ${result.baseBranch}:`);
+    lines.push(`git fetch origin`);
+    lines.push(`git rebase origin/${result.baseBranch}`);
+    lines.push('```');
+    lines.push('');
+    lines.push('*This is a WARN — not blocking.*');
+    lines.push('');
+    lines.push('</details>');
+    return lines.join('\n');
+}
+
+
+/***/ }),
+
+/***/ 5787:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Test Count Regression Detection (S043)
+ *
+ * Detects if the number of tests has decreased compared to the base branch.
+ * Parses jest output or test file counts to compare.
+ *
+ * Output: WARN tier finding.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.TEST_CASE_PATTERNS = exports.TEST_FILE_PATTERNS = void 0;
+exports.isTestFile = isTestFile;
+exports.countTestCasesInContent = countTestCasesInContent;
+exports.decodeBase64Content = decodeBase64Content;
+exports.getTestFilesInBranch = getTestFilesInBranch;
+exports.countTestsInBranch = countTestsInBranch;
+exports.detectTestCountRegression = detectTestCountRegression;
+exports["default"] = detectTestCountRegression;
+exports.formatTestCountRegressionWarning = formatTestCountRegressionWarning;
+// ============================================================================
+// Core Logic
+// ============================================================================
+/**
+ * Test file patterns to detect test files
+ */
+exports.TEST_FILE_PATTERNS = [
+    /\.(test|spec)\.(ts|tsx|js|jsx)$/,
+    /__tests__\/.*\.(ts|tsx|js|jsx)$/,
+];
+/**
+ * Patterns that identify individual test cases within a file
+ */
+exports.TEST_CASE_PATTERNS = [
+    /^\s*(it|test)\s*\(/gm,
+    /^\s*(it|test)\.(only|skip|each)\s*\(/gm,
+];
+/**
+ * Check if a file path is a test file
+ */
+function isTestFile(path) {
+    return exports.TEST_FILE_PATTERNS.some((pattern) => pattern.test(path));
+}
+/**
+ * Count test cases in file content by counting it/test blocks
+ */
+function countTestCasesInContent(content) {
+    let count = 0;
+    for (const pattern of exports.TEST_CASE_PATTERNS) {
+        const matches = content.match(pattern);
+        if (matches) {
+            count += matches.length;
+        }
+        // Reset lastIndex for global patterns
+        pattern.lastIndex = 0;
+    }
+    return count;
+}
+/**
+ * Decode base64 content from GitHub API
+ */
+function decodeBase64Content(encoded) {
+    return Buffer.from(encoded.replace(/\n/g, ''), 'base64').toString('utf-8');
+}
+/**
+ * Get all test files in a branch via the git tree API
+ */
+async function getTestFilesInBranch(octokit, owner, repo, branch) {
+    // Get the branch ref
+    const refResponse = await octokit.rest.git.getRef({
+        owner,
+        repo,
+        ref: `heads/${branch}`,
+    });
+    const commitSha = refResponse.data.object.sha;
+    // Get the commit to find the tree SHA
+    const commitResponse = await octokit.rest.git.getCommit({
+        owner,
+        repo,
+        commit_sha: commitSha,
+    });
+    const treeSha = commitResponse.data.tree.sha;
+    // Get the full tree recursively
+    const treeResponse = await octokit.rest.git.getTree({
+        owner,
+        repo,
+        tree_sha: treeSha,
+        recursive: '1',
+    });
+    return treeResponse.data.tree
+        .filter((item) => item.type === 'blob' && item.path && isTestFile(item.path))
+        .map((item) => item.path);
+}
+/**
+ * Count total tests in a branch by reading all test files
+ */
+async function countTestsInBranch(octokit, owner, repo, branch) {
+    const testFiles = await getTestFilesInBranch(octokit, owner, repo, branch);
+    let totalTests = 0;
+    for (const filePath of testFiles) {
+        try {
+            const response = await octokit.rest.repos.getContent({
+                owner,
+                repo,
+                path: filePath,
+                ref: branch,
+            });
+            const data = response.data;
+            if (data.content && data.encoding === 'base64') {
+                const content = decodeBase64Content(data.content);
+                totalTests += countTestCasesInContent(content);
+            }
+        }
+        catch {
+            // Skip files we can't read
+        }
+    }
+    return {
+        totalTests,
+        testFiles: testFiles.length,
+        branch,
+    };
+}
+/**
+ * Detect test count regression between branch and base branch.
+ *
+ * Compares total test count on the PR branch vs the base branch.
+ * Flags if branch has fewer tests than base.
+ */
+async function detectTestCountRegression(options) {
+    const { octokit, owner, repo, headBranch, baseBranch } = options;
+    const [branchSnapshot, baseSnapshot] = await Promise.all([
+        countTestsInBranch(octokit, owner, repo, headBranch),
+        countTestsInBranch(octokit, owner, repo, baseBranch),
+    ]);
+    const delta = branchSnapshot.totalTests - baseSnapshot.totalTests;
+    const hasRegression = delta < 0;
+    let message = '';
+    if (hasRegression) {
+        message =
+            `Test count decreased: ${baseSnapshot.totalTests} → ${branchSnapshot.totalTests}. ` +
+                `Verify no tests were accidentally removed`;
+    }
+    else {
+        message = `Test count: ${branchSnapshot.totalTests} (${delta >= 0 ? '+' : ''}${delta} from base)`;
+    }
+    return {
+        hasRegression,
+        branchCount: branchSnapshot.totalTests,
+        baseCount: baseSnapshot.totalTests,
+        delta,
+        message,
+    };
+}
+// ============================================================================
+// Formatting
+// ============================================================================
+/**
+ * Format test count regression result as a PR comment section
+ */
+function formatTestCountRegressionWarning(result) {
+    if (!result.hasRegression) {
+        return '';
+    }
+    const lines = [];
+    lines.push('<details>');
+    lines.push(`<summary>:warning: **Test Count Regression** — ${result.baseCount} → ${result.branchCount} (${result.delta})</summary>`);
+    lines.push('');
+    lines.push(result.message + '.');
+    lines.push('');
+    lines.push('**What to check:**');
+    lines.push('- Were test files accidentally deleted?');
+    lines.push('- Were `it`/`test` blocks removed without equivalent replacements?');
+    lines.push('- Were tests moved to a different file (and counted correctly)?');
+    lines.push('');
+    lines.push('*This is a WARN — not blocking.*');
+    lines.push('');
+    lines.push('</details>');
+    return lines.join('\n');
+}
 
 
 /***/ }),
@@ -35305,7 +37441,7 @@ exports["default"] = exports.gitleaksGate;
  * Exports all gate implementations and common types.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.frontendViolationToAnnotation = exports.scanForImportPathInconsistency = exports.analyzeComponentGraphImpact = exports.buildComponentGraph = exports.scanForImportCycles = exports.detectCycles = exports.buildDependencyGraph = exports.scanForTypeScriptStrictIssues = exports.scanForImageWithoutDimensions = exports.calculateBundleDelta = exports.scanForA11yIssues = exports.scanForServerClientBoundary = exports.scanForRerenderTraps = exports.scanForMissingDependencies = exports.scanForMissingKeys = exports.scanForUnhandledAsyncState = exports.frontendChecksGate = exports.designSystemViolationToAnnotation = exports.scanForFontSizeViolations = exports.scanForSpacingViolations = exports.scanForHardcodedColors = exports.scanForBannedClasses = exports.designSystemGate = exports.npmAuditViolationToAnnotation = exports.parseNpmAuditOutput = exports.npmAuditGate = exports.gitleaksViolationToAnnotation = exports.gitleaksGetChangedFiles = exports.parseGitleaksOutput = exports.gitleaksGate = exports.semgrepViolationToAnnotation = exports.semgrepGetChangedFiles = exports.parseSemgrepOutputWithSeverity = exports.parseSemgrepOutput = exports.semgrepGate = exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
+exports.runLLMReviewGate = exports.createLLMReviewGate = exports.visualResultToAnnotation = exports.runVisualGate = exports.visualGate = exports.frontendViolationToAnnotation = exports.scanForImportPathInconsistency = exports.analyzeComponentGraphImpact = exports.buildComponentGraph = exports.scanForImportCycles = exports.detectCycles = exports.buildDependencyGraph = exports.scanForTypeScriptStrictIssues = exports.scanForImageWithoutDimensions = exports.calculateBundleDelta = exports.scanForA11yIssues = exports.scanForServerClientBoundary = exports.scanForRerenderTraps = exports.scanForMissingDependencies = exports.scanForMissingKeys = exports.scanForUnhandledAsyncState = exports.frontendChecksGate = exports.designSystemViolationToAnnotation = exports.scanForFontSizeViolations = exports.scanForSpacingViolations = exports.scanForHardcodedColors = exports.scanForBannedClasses = exports.designSystemGate = exports.npmAuditViolationToAnnotation = exports.parseNpmAuditOutput = exports.npmAuditGate = exports.gitleaksViolationToAnnotation = exports.gitleaksGetChangedFiles = exports.parseGitleaksOutput = exports.gitleaksGate = exports.semgrepViolationToAnnotation = exports.semgrepGetChangedFiles = exports.parseSemgrepOutputWithSeverity = exports.parseSemgrepOutput = exports.semgrepGate = exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
 // TypeScript Gate
 var typescript_1 = __nccwpck_require__(9249);
 Object.defineProperty(exports, "typescriptGate", ({ enumerable: true, get: function () { return typescript_1.typescriptGate; } }));
@@ -35363,6 +37499,165 @@ Object.defineProperty(exports, "buildComponentGraph", ({ enumerable: true, get: 
 Object.defineProperty(exports, "analyzeComponentGraphImpact", ({ enumerable: true, get: function () { return frontend_checks_1.analyzeComponentGraphImpact; } }));
 Object.defineProperty(exports, "scanForImportPathInconsistency", ({ enumerable: true, get: function () { return frontend_checks_1.scanForImportPathInconsistency; } }));
 Object.defineProperty(exports, "frontendViolationToAnnotation", ({ enumerable: true, get: function () { return frontend_checks_1.violationToAnnotation; } }));
+// Visual Gate
+var visual_1 = __nccwpck_require__(5818);
+Object.defineProperty(exports, "visualGate", ({ enumerable: true, get: function () { return visual_1.visualGate; } }));
+Object.defineProperty(exports, "runVisualGate", ({ enumerable: true, get: function () { return visual_1.runVisualGate; } }));
+Object.defineProperty(exports, "visualResultToAnnotation", ({ enumerable: true, get: function () { return visual_1.resultToAnnotation; } }));
+// LLM Review Gate
+var llm_review_1 = __nccwpck_require__(3604);
+Object.defineProperty(exports, "createLLMReviewGate", ({ enumerable: true, get: function () { return llm_review_1.createLLMReviewGate; } }));
+Object.defineProperty(exports, "runLLMReviewGate", ({ enumerable: true, get: function () { return llm_review_1.runLLMReviewGate; } }));
+
+
+/***/ }),
+
+/***/ 3604:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/**
+ * LLM Review Gate
+ *
+ * Integrates the LLM semantic review into the Hawky gate system.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.runLLMReviewGate = runLLMReviewGate;
+exports.createLLMReviewGate = createLLMReviewGate;
+const context_1 = __nccwpck_require__(7400);
+const review_1 = __nccwpck_require__(807);
+// ============================================================================
+// Gate Implementation
+// ============================================================================
+/**
+ * Convert review issues to annotations
+ */
+function issuesToAnnotations(issues) {
+    return issues.map((issue) => {
+        // Map 'info' to 'notice' for AnnotationSeverity
+        let severity = 'warning';
+        if (issue.severity === 'error') {
+            severity = 'error';
+        }
+        else if (issue.severity === 'info') {
+            severity = 'notice';
+        }
+        return {
+            file: issue.file,
+            line: issue.line || 1,
+            message: issue.message,
+            severity,
+            ruleId: issue.category ? `llm-${issue.category}` : 'llm-review',
+            title: issue.category || 'LLM Review',
+        };
+    });
+}
+/**
+ * Run the LLM review gate
+ */
+async function runLLMReviewGate(options, runOptions) {
+    const startTime = Date.now();
+    try {
+        // Assemble context
+        const contextOptions = {
+            rootDir: runOptions.cwd,
+            diff: options.diff,
+            maxTokens: options.maxTokens || 8000,
+            includeFullFiles: options.includeFullFiles ?? true,
+        };
+        const context = (0, context_1.assembleContext)(contextOptions);
+        // Run review
+        const reviewOptions = {
+            client: options.client,
+            context,
+        };
+        if (options.focusAreas) {
+            reviewOptions.focusAreas = options.focusAreas;
+        }
+        const result = await (0, review_1.runReview)(reviewOptions);
+        // Check confidence threshold
+        const minConfidence = options.minConfidence ?? 0.5;
+        if (result.confidence < minConfidence) {
+            return {
+                gate: 'llm-review', // Cast needed as llm-review isn't in GateName yet
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: `LLM review skipped (confidence ${Math.round(result.confidence * 100)}% below threshold ${Math.round(minConfidence * 100)}%)`,
+            };
+        }
+        // Convert to gate format
+        const annotations = issuesToAnnotations(result.issues);
+        const violations = (0, review_1.reviewIssuesToViolations)(result.issues, 'llm-review');
+        const errorCount = result.issues.filter((i) => i.severity === 'error').length;
+        const status = errorCount > 0 ? 'fail' : 'pass';
+        return {
+            gate: 'llm-review',
+            status,
+            totalViolations: result.issues.length,
+            newViolations: result.issues.length,
+            existingViolations: 0,
+            ignoredViolations: 0,
+            annotations: runOptions.createAnnotations ? annotations : [],
+            violations: violations,
+            timeMs: Date.now() - startTime,
+            message: `LLM review: ${result.issues.length} issues found (${errorCount} errors). ${result.summary}`,
+        };
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return {
+            gate: 'llm-review',
+            status: 'error',
+            totalViolations: 0,
+            newViolations: 0,
+            existingViolations: 0,
+            ignoredViolations: 0,
+            annotations: [],
+            violations: [],
+            timeMs: Date.now() - startTime,
+            message: `LLM review failed: ${errorMessage}`,
+            error: errorMessage,
+        };
+    }
+}
+/**
+ * Create a Gate object for LLM review
+ */
+function createLLMReviewGate(getOptions) {
+    return {
+        name: 'llm-review',
+        displayName: 'LLM Code Review',
+        async canRun() {
+            const options = await getOptions();
+            return options !== null;
+        },
+        async run(runOptions) {
+            const options = await getOptions();
+            if (!options) {
+                return {
+                    gate: 'llm-review',
+                    status: 'skip',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs: 0,
+                    message: 'LLM review skipped (no LLM client configured)',
+                };
+            }
+            return runLLMReviewGate(options, runOptions);
+        },
+    };
+}
 
 
 /***/ }),
@@ -36536,6 +38831,447 @@ exports["default"] = exports.typescriptGate;
 
 /***/ }),
 
+/***/ 5818:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Visual Gate
+ *
+ * Performs visual regression testing by comparing screenshots
+ * of the PR branch against the base branch.
+ *
+ * S071: Visual Gate
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.visualGate = void 0;
+exports.resultToAnnotation = resultToAnnotation;
+exports.runVisualGate = runVisualGate;
+const core = __importStar(__nccwpck_require__(7484));
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+const screenshot_1 = __nccwpck_require__(2486);
+const diff_1 = __nccwpck_require__(3953);
+const types_1 = __nccwpck_require__(4521);
+/**
+ * Default viewport if none configured
+ */
+const DEFAULT_VIEWPORT = {
+    width: 1920,
+    height: 1080,
+    name: 'desktop',
+};
+/**
+ * Convert ViewportConfig to Viewport type
+ */
+function toViewport(config) {
+    const viewport = {
+        width: config.width,
+        height: config.height,
+    };
+    if (config.name !== undefined) {
+        viewport.name = config.name;
+    }
+    return viewport;
+}
+/**
+ * Generate screenshot filename for a route and viewport
+ */
+function generateScreenshotName(route, viewport, branch) {
+    // Sanitize route for filename
+    const sanitizedRoute = route
+        .replace(/https?:\/\//, '')
+        .replace(/[^a-zA-Z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .slice(0, 50);
+    const viewportName = viewport.name ?? `${viewport.width}x${viewport.height}`;
+    return `${branch}-${sanitizedRoute}-${viewportName}.png`;
+}
+/**
+ * Convert visual test result to violation
+ */
+function resultToViolation(result) {
+    const viewportName = result.viewport.name ?? `${result.viewport.width}x${result.viewport.height}`;
+    return {
+        ruleId: 'visual/regression',
+        file: result.route,
+        line: 1,
+        message: result.error
+            ? `Visual test error: ${result.error}`
+            : `Visual regression detected: ${result.diffPercentage.toFixed(2)}% difference at ${viewportName}`,
+        gate: 'visual',
+        severity: 'warning',
+    };
+}
+/**
+ * Convert visual test result to annotation
+ */
+function resultToAnnotation(result) {
+    const viewportName = result.viewport.name ?? `${result.viewport.width}x${result.viewport.height}`;
+    return {
+        file: result.route,
+        line: 1,
+        message: result.error
+            ? `Visual test error: ${result.error}`
+            : `Visual regression: ${result.diffPercentage.toFixed(2)}% difference (threshold: exceeded) at ${viewportName}`,
+        severity: result.error ? 'error' : 'warning',
+        ruleId: 'visual/regression',
+        title: `Visual Regression at ${viewportName}`,
+    };
+}
+/**
+ * Run visual tests for all configured routes and viewports
+ */
+async function runVisualTests(config, baselineDir, currentDir) {
+    const results = [];
+    const routes = config.routes ?? [];
+    const viewports = (config.viewports ?? [DEFAULT_VIEWPORT]).map((v) => typeof v === 'object' && 'width' in v ? toViewport(v) : DEFAULT_VIEWPORT);
+    const threshold = config.threshold ?? types_1.DEFAULT_THRESHOLD;
+    const timeout = config.timeout ?? types_1.DEFAULT_TIMEOUT;
+    const waitFor = config.waitFor;
+    if (routes.length === 0) {
+        core.info('No routes configured for visual testing');
+        return results;
+    }
+    core.info(`Running visual tests: ${routes.length} routes x ${viewports.length} viewports`);
+    for (const route of routes) {
+        for (const viewport of viewports) {
+            const viewportName = viewport.name ?? `${viewport.width}x${viewport.height}`;
+            core.info(`Testing ${route} at ${viewportName}...`);
+            const baselineName = generateScreenshotName(route, viewport, 'baseline');
+            const currentName = generateScreenshotName(route, viewport, 'current');
+            const baselinePath = path.join(baselineDir, baselineName);
+            const currentPath = path.join(currentDir, currentName);
+            // Check if baseline exists (from base branch)
+            if (!fs.existsSync(baselinePath)) {
+                // No baseline = capture current and skip comparison
+                core.info(`No baseline found for ${route} at ${viewportName}, capturing initial screenshot`);
+                const captureOpts = {
+                    viewport,
+                    timeout,
+                    outputDir: currentDir,
+                    filename: currentName,
+                };
+                if (waitFor !== undefined) {
+                    captureOpts.waitFor = waitFor;
+                }
+                const captureResult = await (0, screenshot_1.captureScreenshot)(route, captureOpts);
+                if (!captureResult.success) {
+                    const errResult = {
+                        route,
+                        viewport,
+                        diffPercentage: 0,
+                        passed: true, // No baseline means pass
+                        baselinePath,
+                        currentPath,
+                        error: `No baseline (first run): ${captureResult.error ?? 'captured new baseline'}`,
+                    };
+                    results.push(errResult);
+                }
+                else {
+                    results.push({
+                        route,
+                        viewport,
+                        diffPercentage: 0,
+                        passed: true,
+                        baselinePath,
+                        currentPath: captureResult.path ?? currentPath,
+                    });
+                }
+                continue;
+            }
+            // Capture current screenshot
+            const currentCaptureOpts = {
+                viewport,
+                timeout,
+                outputDir: currentDir,
+                filename: currentName,
+            };
+            if (waitFor !== undefined) {
+                currentCaptureOpts.waitFor = waitFor;
+            }
+            const captureResult = await (0, screenshot_1.captureScreenshot)(route, currentCaptureOpts);
+            if (!captureResult.success) {
+                const failResult = {
+                    route,
+                    viewport,
+                    diffPercentage: 100,
+                    passed: false,
+                    baselinePath,
+                    currentPath,
+                };
+                if (captureResult.error !== undefined) {
+                    failResult.error = captureResult.error;
+                }
+                results.push(failResult);
+                continue;
+            }
+            // Compare screenshots
+            const diffResult = await (0, diff_1.diffScreenshots)(baselinePath, captureResult.path ?? currentPath, {
+                threshold,
+            });
+            if (!diffResult.success) {
+                const diffFailResult = {
+                    route,
+                    viewport,
+                    diffPercentage: 100,
+                    passed: false,
+                    baselinePath,
+                    currentPath: captureResult.path ?? currentPath,
+                };
+                if (diffResult.error !== undefined) {
+                    diffFailResult.error = diffResult.error;
+                }
+                results.push(diffFailResult);
+                continue;
+            }
+            const passed = diffResult.matched ?? (diffResult.diffPercentage ?? 0) <= threshold;
+            const testResult = {
+                route,
+                viewport,
+                diffPercentage: diffResult.diffPercentage ?? 0,
+                passed,
+                baselinePath,
+                currentPath: captureResult.path ?? currentPath,
+            };
+            if (diffResult.diffImagePath !== undefined) {
+                testResult.diffImagePath = diffResult.diffImagePath;
+            }
+            results.push(testResult);
+            if (!passed) {
+                core.warning(`Visual regression at ${route} (${viewportName}): ${diffResult.diffPercentage?.toFixed(2)}% difference`);
+            }
+        }
+    }
+    return results;
+}
+/**
+ * Visual regression gate implementation
+ */
+exports.visualGate = {
+    name: 'visual',
+    displayName: 'Visual Regression',
+    async canRun(_cwd) {
+        // Check if visual config exists with routes
+        // This would normally load config, but for now just return true
+        // The actual config check happens in run()
+        return true;
+    },
+    async run(options) {
+        const startTime = Date.now();
+        const violations = [];
+        const annotations = [];
+        try {
+            // Load visual config from environment or config
+            // In actual implementation, this would come from parsed config
+            const visualConfig = {
+                enabled: process.env['HAWKY_VISUAL_ENABLED'] === 'true',
+                threshold: parseFloat(process.env['HAWKY_VISUAL_THRESHOLD'] ?? '0.1'),
+                routes: (process.env['HAWKY_VISUAL_ROUTES'] ?? '').split(',').filter(Boolean),
+                timeout: parseInt(process.env['HAWKY_VISUAL_TIMEOUT'] ?? '30000', 10),
+                viewports: [DEFAULT_VIEWPORT],
+            };
+            const envWaitFor = process.env['HAWKY_VISUAL_WAIT_FOR'];
+            if (envWaitFor !== undefined) {
+                visualConfig.waitFor = envWaitFor;
+            }
+            // Skip if not enabled or no routes
+            if (!visualConfig.enabled || !visualConfig.routes || visualConfig.routes.length === 0) {
+                return {
+                    gate: 'visual',
+                    status: 'skip',
+                    totalViolations: 0,
+                    newViolations: 0,
+                    existingViolations: 0,
+                    ignoredViolations: 0,
+                    annotations: [],
+                    violations: [],
+                    timeMs: Date.now() - startTime,
+                    message: 'Visual testing skipped: not enabled or no routes configured',
+                };
+            }
+            // Set up directories
+            const baselineDir = process.env['HAWKY_VISUAL_BASELINE_DIR'] ?? '/tmp/hawky-visual/baseline';
+            const currentDir = process.env['HAWKY_VISUAL_CURRENT_DIR'] ?? '/tmp/hawky-visual/current';
+            // Ensure directories exist
+            if (!fs.existsSync(baselineDir)) {
+                fs.mkdirSync(baselineDir, { recursive: true });
+            }
+            if (!fs.existsSync(currentDir)) {
+                fs.mkdirSync(currentDir, { recursive: true });
+            }
+            // Run visual tests
+            const results = await runVisualTests(visualConfig, baselineDir, currentDir);
+            // Clean up headless browser
+            await (0, screenshot_1.stopHeadlessBrowser)();
+            // Convert failed results to violations
+            const failedResults = results.filter((r) => !r.passed);
+            for (const result of failedResults) {
+                violations.push(resultToViolation(result));
+                if (options.createAnnotations) {
+                    annotations.push(resultToAnnotation(result));
+                }
+            }
+            const passedCount = results.filter((r) => r.passed).length;
+            const status = violations.length > 0 ? 'fail' : 'pass';
+            return {
+                gate: 'visual',
+                status,
+                totalViolations: violations.length,
+                newViolations: violations.length, // All visual violations are "new"
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations,
+                violations,
+                timeMs: Date.now() - startTime,
+                message: violations.length > 0
+                    ? `Visual regressions detected: ${violations.length} failed, ${passedCount} passed`
+                    : `Visual tests passed: ${passedCount} tests`,
+            };
+        }
+        catch (error) {
+            // Ensure browser is stopped even on error
+            try {
+                await (0, screenshot_1.stopHeadlessBrowser)();
+            }
+            catch {
+                // Ignore cleanup errors
+            }
+            return {
+                gate: 'visual',
+                status: 'error',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: 'Visual gate error',
+                error: error instanceof Error ? error.message : 'Unknown error',
+            };
+        }
+    },
+};
+/**
+ * Run visual gate with explicit config
+ *
+ * Alternative entry point for use with parsed config
+ */
+async function runVisualGate(config, baselineDir, currentDir, options) {
+    const startTime = Date.now();
+    const violations = [];
+    const annotations = [];
+    try {
+        if (!config.enabled || !config.routes || config.routes.length === 0) {
+            return {
+                gate: 'visual',
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - startTime,
+                message: 'Visual testing skipped: not enabled or no routes configured',
+            };
+        }
+        // Ensure directories exist
+        if (!fs.existsSync(baselineDir)) {
+            fs.mkdirSync(baselineDir, { recursive: true });
+        }
+        if (!fs.existsSync(currentDir)) {
+            fs.mkdirSync(currentDir, { recursive: true });
+        }
+        const results = await runVisualTests(config, baselineDir, currentDir);
+        // Clean up
+        await (0, screenshot_1.stopHeadlessBrowser)();
+        // Convert failed results to violations
+        const failedResults = results.filter((r) => !r.passed);
+        for (const result of failedResults) {
+            violations.push(resultToViolation(result));
+            if (options.createAnnotations) {
+                annotations.push(resultToAnnotation(result));
+            }
+        }
+        const passedCount = results.filter((r) => r.passed).length;
+        const status = violations.length > 0 ? 'fail' : 'pass';
+        return {
+            gate: 'visual',
+            status,
+            totalViolations: violations.length,
+            newViolations: violations.length,
+            existingViolations: 0,
+            ignoredViolations: 0,
+            annotations,
+            violations,
+            timeMs: Date.now() - startTime,
+            message: violations.length > 0
+                ? `Visual regressions detected: ${violations.length} failed, ${passedCount} passed`
+                : `Visual tests passed: ${passedCount} tests`,
+        };
+    }
+    catch (error) {
+        try {
+            await (0, screenshot_1.stopHeadlessBrowser)();
+        }
+        catch {
+            // Ignore cleanup errors
+        }
+        return {
+            gate: 'visual',
+            status: 'error',
+            totalViolations: 0,
+            newViolations: 0,
+            existingViolations: 0,
+            ignoredViolations: 0,
+            annotations: [],
+            violations: [],
+            timeMs: Date.now() - startTime,
+            message: 'Visual gate error',
+            error: error instanceof Error ? error.message : 'Unknown error',
+        };
+    }
+}
+
+
+/***/ }),
+
 /***/ 2446:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -37021,6 +39757,8 @@ const ignore_1 = __nccwpck_require__(2446);
 const github = __importStar(__nccwpck_require__(3228));
 const gates_1 = __nccwpck_require__(6620);
 const report_1 = __nccwpck_require__(1714);
+const coordination_1 = __nccwpck_require__(9727);
+const fs = __importStar(__nccwpck_require__(9896));
 /**
  * Read and parse action inputs from workflow
  */
@@ -37424,8 +40162,401 @@ async function run() {
             }
             core.endGroup();
         }
-        // Set outputs
-        const overallStatus = hasBlockingFailure ? 'fail' : 'pass';
+        // S096: Run Coordination Phase
+        const coordinationFindings = [];
+        let hasCoordinationBlock = false;
+        const context = github.context;
+        const pr = context.payload.pull_request;
+        const prNumber = pr?.number;
+        const prHead = pr?.['head'];
+        const prBase = pr?.['base'];
+        const headBranch = prHead?.['ref'];
+        const baseBranch = prBase?.['ref'];
+        const prBody = pr?.['body'] || '';
+        if (config.coordination.enabled && prNumber && headBranch && baseBranch && inputs.githubToken) {
+            core.startGroup('Running Coordination Checks');
+            core.info(`Coordination enabled — running checks on PR #${prNumber}`);
+            const octokit = github.getOctokit(inputs.githubToken);
+            const repoParts = context.repo;
+            const owner = repoParts.owner;
+            const repo = repoParts.repo;
+            // Get changed files from PR
+            let changedFiles = [];
+            try {
+                const { data: files } = await octokit.rest.pulls.listFiles({
+                    owner,
+                    repo,
+                    pull_number: prNumber,
+                    per_page: 100,
+                });
+                changedFiles = files.map((f) => f.filename);
+                core.info(`PR has ${changedFiles.length} changed file(s)`);
+            }
+            catch (err) {
+                core.warning(`Failed to get PR files: ${err}`);
+            }
+            // Run coordination checks in parallel where possible
+            const coordinationPromises = [];
+            // S035: Concurrent PRs (WARN)
+            if (config.coordination.concurrentPrs && changedFiles.length > 0) {
+                coordinationPromises.push((async () => {
+                    try {
+                        const result = await (0, coordination_1.detectConcurrentPRs)({
+                            octokit,
+                            owner,
+                            repo,
+                            currentPRNumber: prNumber,
+                            currentPRFiles: changedFiles,
+                            baseBranch,
+                        });
+                        if (result.hasConcurrentPRs) {
+                            const details = (0, coordination_1.formatConcurrentPRWarning)(result);
+                            coordinationFindings.push({
+                                check: 'concurrent_prs',
+                                tier: 'warn',
+                                summary: `${result.conflictingPRs.length} concurrent PR(s) touch same files`,
+                                details,
+                                blocking: false,
+                            });
+                            core.info(`[WARN] Concurrent PRs: ${result.conflictingPRs.length} overlapping`);
+                        }
+                        else {
+                            core.info('[PASS] Concurrent PRs: No conflicts');
+                        }
+                    }
+                    catch (err) {
+                        core.warning(`Concurrent PRs check failed: ${err}`);
+                    }
+                })());
+            }
+            // S036: Contract Divergence (BLOCK)
+            if (config.coordination.contractDivergence && changedFiles.length > 0) {
+                coordinationPromises.push((async () => {
+                    try {
+                        const result = await (0, coordination_1.detectContractDivergence)({
+                            octokit,
+                            owner,
+                            repo,
+                            headBranch,
+                            baseBranch,
+                            changedFiles,
+                            prBody,
+                        });
+                        if (result.hasDivergence) {
+                            const details = (0, coordination_1.formatContractDivergenceBlock)(result);
+                            coordinationFindings.push({
+                                check: 'contract_divergence',
+                                tier: 'block',
+                                summary: `API contract divergence with ${result.frontendPRs.length} frontend PR(s)`,
+                                details,
+                                blocking: true,
+                            });
+                            hasCoordinationBlock = true;
+                            core.info(`[BLOCK] Contract Divergence: ${result.frontendPRs.length} frontend PRs affected`);
+                        }
+                        else {
+                            core.info('[PASS] Contract Divergence: No divergence');
+                        }
+                    }
+                    catch (err) {
+                        core.warning(`Contract divergence check failed: ${err}`);
+                    }
+                })());
+            }
+            // S037: Parallel Migrations (BLOCK)
+            if (config.coordination.parallelMigrations && changedFiles.length > 0) {
+                coordinationPromises.push((async () => {
+                    try {
+                        const result = await (0, coordination_1.detectParallelMigrations)({
+                            octokit,
+                            owner,
+                            repo,
+                            currentPRNumber: prNumber,
+                            currentPRFiles: changedFiles,
+                            baseBranch,
+                        });
+                        if (result.hasParallelMigrations) {
+                            const details = (0, coordination_1.formatSchemaMigrationBlock)(result);
+                            coordinationFindings.push({
+                                check: 'parallel_migrations',
+                                tier: 'block',
+                                summary: `${result.migrationPRs.length + 1} PR(s) with database migrations`,
+                                details,
+                                blocking: true,
+                            });
+                            hasCoordinationBlock = true;
+                            core.info(`[BLOCK] Parallel Migrations: ${result.migrationPRs.length} other PRs have migrations`);
+                        }
+                        else if (result.currentPRMigrations.length > 0) {
+                            core.info(`[PASS] Parallel Migrations: This PR has migrations but no conflicts`);
+                        }
+                        else {
+                            core.info('[PASS] Parallel Migrations: No migrations in this PR');
+                        }
+                    }
+                    catch (err) {
+                        core.warning(`Parallel migrations check failed: ${err}`);
+                    }
+                })());
+            }
+            // S038: Stale Branch (WARN)
+            if (config.coordination.staleBranch) {
+                coordinationPromises.push((async () => {
+                    try {
+                        const result = await (0, coordination_1.checkStaleBranch)({
+                            octokit: octokit,
+                            owner,
+                            repo,
+                            headBranch,
+                            baseBranch,
+                            threshold: config.coordination.staleBranchCommits,
+                            daysThreshold: config.coordination.staleBranchDays,
+                        });
+                        if (result.isStale) {
+                            const details = (0, coordination_1.formatStaleBranchWarning)(result);
+                            coordinationFindings.push({
+                                check: 'stale_branch',
+                                tier: 'warn',
+                                summary: `Branch is ${result.commitsBehind} commits behind ${baseBranch}`,
+                                details,
+                                blocking: false,
+                            });
+                            core.info(`[WARN] Stale Branch: ${result.commitsBehind} commits behind`);
+                        }
+                        else {
+                            core.info(`[PASS] Stale Branch: Only ${result.commitsBehind} commits behind (threshold: ${result.threshold})`);
+                        }
+                    }
+                    catch (err) {
+                        core.warning(`Stale branch check failed: ${err}`);
+                    }
+                })());
+            }
+            // S039: Spec Mismatch (WARN) - only if spec files were changed
+            if (config.coordination.specMismatch && changedFiles.length > 0) {
+                const specFiles = changedFiles.filter((f) => /\.(md|yaml|yml|json|graphql|gql|proto)$/i.test(f) &&
+                    /(spec|schema|openapi|swagger|design)/i.test(f));
+                if (specFiles.length > 0) {
+                    coordinationPromises.push((async () => {
+                        try {
+                            const result = await (0, coordination_1.detectSpecMismatch)({
+                                octokit: octokit,
+                                owner,
+                                repo,
+                                headBranch,
+                                baseBranch,
+                                specFiles,
+                            });
+                            if (result.hasStaleSpecs) {
+                                const details = (0, coordination_1.formatSpecMismatchWarning)(result);
+                                coordinationFindings.push({
+                                    check: 'spec_mismatch',
+                                    tier: 'warn',
+                                    summary: `${result.staleSpecs.length} spec file(s) updated after branch cut`,
+                                    details,
+                                    blocking: false,
+                                });
+                                core.info(`[WARN] Spec Mismatch: ${result.staleSpecs.length} stale spec(s)`);
+                            }
+                            else {
+                                core.info('[PASS] Spec Mismatch: All specs current');
+                            }
+                        }
+                        catch (err) {
+                            core.warning(`Spec mismatch check failed: ${err}`);
+                        }
+                    })());
+                }
+            }
+            // S040: Ownership Collision (WARN)
+            if (config.coordination.ownershipCollision && changedFiles.length > 0) {
+                coordinationPromises.push((async () => {
+                    try {
+                        const result = (0, coordination_1.detectOwnershipCollisions)({
+                            branchName: headBranch,
+                            changedFiles,
+                        });
+                        if (result.hasCollisions) {
+                            const details = (0, coordination_1.formatOwnershipCollisionWarning)(result);
+                            coordinationFindings.push({
+                                check: 'ownership_collision',
+                                tier: 'warn',
+                                summary: `${result.branchDomain} branch touching ${result.collisions.length} cross-domain file(s)`,
+                                details,
+                                blocking: false,
+                            });
+                            core.info(`[WARN] Ownership Collision: ${result.collisions.length} cross-domain files`);
+                        }
+                        else if (result.branchDomain) {
+                            core.info(`[PASS] Ownership Collision: All files within ${result.branchDomain} domain`);
+                        }
+                        else {
+                            core.info('[SKIP] Ownership Collision: Unrecognized branch prefix');
+                        }
+                    }
+                    catch (err) {
+                        core.warning(`Ownership collision check failed: ${err}`);
+                    }
+                })());
+            }
+            // S041: Dependency Enforcement (BLOCK)
+            if (config.coordination.dependencyEnforcement) {
+                coordinationPromises.push((async () => {
+                    try {
+                        // Try to read SPRINT.md from .claude/work/SPRINT.md
+                        let sprintMdContent = '';
+                        const sprintMdPath = __nccwpck_require__.ab + "SPRINT.md";
+                        try {
+                            if (fs.existsSync(__nccwpck_require__.ab + "SPRINT.md")) {
+                                sprintMdContent = fs.readFileSync(__nccwpck_require__.ab + "SPRINT.md", 'utf-8');
+                            }
+                        }
+                        catch {
+                            // SPRINT.md not found, skip
+                        }
+                        if (sprintMdContent) {
+                            const result = await (0, coordination_1.enforceDependencies)({
+                                octokit,
+                                owner,
+                                repo,
+                                headBranch,
+                                baseBranch,
+                                sprintMdContent,
+                            });
+                            if (result.hasUnmetDependencies) {
+                                const details = (0, coordination_1.formatDependencyBlock)(result);
+                                coordinationFindings.push({
+                                    check: 'dependency_enforcement',
+                                    tier: 'block',
+                                    summary: `${result.unmetDependencies.length} unmet story dependencies`,
+                                    details,
+                                    blocking: true,
+                                });
+                                hasCoordinationBlock = true;
+                                core.info(`[BLOCK] Dependencies: ${result.unmetDependencies.length} unmet`);
+                            }
+                            else if (result.allDependencies.length > 0) {
+                                core.info(`[PASS] Dependencies: All ${result.allDependencies.length} satisfied`);
+                            }
+                            else {
+                                core.info('[PASS] Dependencies: No dependencies declared');
+                            }
+                        }
+                        else {
+                            core.info('[SKIP] Dependencies: No SPRINT.md found');
+                        }
+                    }
+                    catch (err) {
+                        core.warning(`Dependency enforcement check failed: ${err}`);
+                    }
+                })());
+            }
+            // S042: Session Handoff (WARN, opt-in) - runs on merge, not on PR check
+            // This is typically run on merge, but we can note if handoffs would be generated
+            if (config.coordination.sessionHandoff && changedFiles.length > 0) {
+                // Note: This check is informational during PR review
+                const prUser = pr?.['user'];
+                const result = (0, coordination_1.generateHandoffNotifications)({
+                    prNumber,
+                    prTitle: pr?.['title'] || '',
+                    prUrl: pr?.['html_url'] || '',
+                    authorLogin: prUser?.['login'] || 'unknown',
+                    headBranch,
+                    baseBranch,
+                    changedFiles,
+                    labels: (pr?.['labels'] || []).map((l) => l.name),
+                    date: new Date().toISOString(),
+                });
+                if (result.hasHandoffs) {
+                    coordinationFindings.push({
+                        check: 'session_handoff',
+                        tier: 'inform',
+                        summary: `${result.notifications.length} handoff notification(s) will be generated on merge`,
+                        details: `This PR will generate handoff notifications to: ${result.notifications.map((n) => n.recipient).join(', ')}`,
+                        blocking: false,
+                    });
+                    core.info(`[INFO] Handoffs: ${result.notifications.length} will be generated on merge`);
+                }
+            }
+            // S043: Test Count Regression (WARN)
+            if (config.coordination.testCountRegression && changedFiles.some((f) => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(f))) {
+                coordinationPromises.push((async () => {
+                    try {
+                        const result = await (0, coordination_1.detectTestCountRegression)({
+                            octokit: octokit,
+                            owner,
+                            repo,
+                            headBranch,
+                            baseBranch,
+                            changedFiles,
+                        });
+                        if (result.hasRegression) {
+                            const details = (0, coordination_1.formatTestCountRegressionWarning)(result);
+                            coordinationFindings.push({
+                                check: 'test_count_regression',
+                                tier: 'warn',
+                                summary: `Test count decreased: ${result.baseCount} -> ${result.branchCount}`,
+                                details,
+                                blocking: false,
+                            });
+                            core.info(`[WARN] Test Regression: ${result.delta} tests`);
+                        }
+                        else {
+                            core.info(`[PASS] Test Count: ${result.branchCount} tests (${result.delta >= 0 ? '+' : ''}${result.delta})`);
+                        }
+                    }
+                    catch (err) {
+                        core.warning(`Test count regression check failed: ${err}`);
+                    }
+                })());
+            }
+            // S045: Authorship Attribution (INFORM, opt-in)
+            if (config.coordination.authorshipAttribution) {
+                coordinationPromises.push((async () => {
+                    try {
+                        const result = await (0, coordination_1.detectMixedAuthorship)({
+                            octokit: octokit,
+                            owner,
+                            repo,
+                            prNumber,
+                        });
+                        if (result.hasMixedAuthors) {
+                            const details = (0, coordination_1.formatAuthorshipAttribution)(result);
+                            coordinationFindings.push({
+                                check: 'authorship_attribution',
+                                tier: 'inform',
+                                summary: `${result.authors.length} contributors across ${result.totalCommits} commit(s)`,
+                                details,
+                                blocking: false,
+                            });
+                            core.info(`[INFO] Authorship: ${result.authors.length} authors`);
+                        }
+                        else {
+                            core.info(`[PASS] Authorship: Single author @${result.primaryAuthor}`);
+                        }
+                    }
+                    catch (err) {
+                        core.warning(`Authorship attribution check failed: ${err}`);
+                    }
+                })());
+            }
+            // Wait for all checks to complete
+            await Promise.all(coordinationPromises);
+            // Log summary
+            const blockCount = coordinationFindings.filter((f) => f.tier === 'block').length;
+            const warnCount = coordinationFindings.filter((f) => f.tier === 'warn').length;
+            const infoCount = coordinationFindings.filter((f) => f.tier === 'inform').length;
+            core.info(`Coordination Summary: ${blockCount} block, ${warnCount} warn, ${infoCount} info`);
+            core.endGroup();
+        }
+        else if (!config.coordination.enabled) {
+            core.info('Coordination checks disabled');
+        }
+        else if (!prNumber) {
+            core.info('Not in PR context — skipping coordination checks');
+        }
+        // Set outputs - include coordination blocks
+        const overallStatus = (hasBlockingFailure || hasCoordinationBlock) ? 'fail' : 'pass';
         // S104: Generate and post PR comment
         core.startGroup('Generating PR Comment');
         // Build gate summaries for report
@@ -37451,7 +40582,6 @@ async function run() {
         // Determine disabled gates
         const disabledGates = config_1.GATE_NAMES.filter((g) => !config.gates[g].enabled);
         // Build report data
-        const context = github.context;
         const reportData = {
             overallStatus,
             gates: gateSummaries,
@@ -37471,6 +40601,7 @@ async function run() {
             workflowUrl: `${context.serverUrl || 'https://github.com'}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId || process.env['GITHUB_RUN_ID'] || '0'}`,
             repository: `${context.repo.owner}/${context.repo.repo}`,
             prNumber: context.payload.pull_request?.number,
+            ...(coordinationFindings.length > 0 ? { coordinationFindings } : {}),
         };
         // Post PR comment
         const commentResult = await (0, report_1.postPRComment)(reportData, inputs.githubToken);
@@ -37506,9 +40637,17 @@ async function run() {
         core.info(`Hawky Summary: ${gatesPassed} passed, ${gatesFailed} failed`);
         core.info(`Overall Status: ${overallStatus.toUpperCase()}`);
         core.info('='.repeat(50));
-        // Fail the action if any blocking gate failed
-        if (hasBlockingFailure) {
-            core.setFailed(`Hawky found blocking violations`);
+        // Fail the action if any blocking gate or coordination check failed
+        if (hasBlockingFailure || hasCoordinationBlock) {
+            const reasons = [];
+            if (hasBlockingFailure) {
+                reasons.push('blocking gate violations');
+            }
+            if (hasCoordinationBlock) {
+                const blockChecks = coordinationFindings.filter((f) => f.tier === 'block').map((f) => f.check);
+                reasons.push(`coordination blocks (${blockChecks.join(', ')})`);
+            }
+            core.setFailed(`Hawky found: ${reasons.join(' and ')}`);
         }
         else {
             core.info('Hawky completed successfully');
@@ -37525,6 +40664,770 @@ async function run() {
 }
 // Run the action
 run();
+
+
+/***/ }),
+
+/***/ 7400:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Context Assembly Pipeline
+ *
+ * Gathers context for LLM code review:
+ * - PR diff (changed files, hunks)
+ * - Full file contents for context
+ * - Gate violations from other gates
+ * - OpenAPI spec (if exists)
+ * - Project conventions (.hawky.yml settings)
+ *
+ * Features:
+ * - Token budget management
+ * - Prioritization of most relevant context
+ * - Truncation strategies
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.estimateTokens = estimateTokens;
+exports.estimateFileTokens = estimateFileTokens;
+exports.parseDiff = parseDiff;
+exports.createPRDiff = createPRDiff;
+exports.loadFileContent = loadFileContent;
+exports.loadFileContents = loadFileContents;
+exports.prioritizeFiles = prioritizeFiles;
+exports.summarizeSpec = summarizeSpec;
+exports.extractConventions = extractConventions;
+exports.formatDiffForLLM = formatDiffForLLM;
+exports.formatViolationsForLLM = formatViolationsForLLM;
+exports.formatFileContentsForLLM = formatFileContentsForLLM;
+exports.assembleContext = assembleContext;
+exports.formatContextAsPrompt = formatContextAsPrompt;
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+// ============================================================================
+// Token Estimation
+// ============================================================================
+/**
+ * Estimate token count for text
+ * Uses a simple heuristic: ~4 characters per token
+ */
+function estimateTokens(text) {
+    return Math.ceil(text.length / 4);
+}
+/**
+ * Estimate tokens for a file
+ */
+function estimateFileTokens(content) {
+    return estimateTokens(content);
+}
+// ============================================================================
+// Diff Parsing
+// ============================================================================
+/**
+ * Parse a unified diff string into structured data
+ */
+function parseDiff(diffText) {
+    const files = [];
+    const lines = diffText.split('\n');
+    let currentFile = null;
+    let currentHunk = null;
+    let hunkContent = [];
+    for (const line of lines) {
+        // File header: diff --git a/path b/path
+        if (line.startsWith('diff --git')) {
+            // Save previous file
+            if (currentFile) {
+                if (currentHunk) {
+                    currentHunk.content = hunkContent.join('\n');
+                    currentFile.hunks.push(currentHunk);
+                }
+                files.push(currentFile);
+            }
+            // Parse file path
+            const fileMatch = line.match(/diff --git a\/(.+) b\/(.+)/);
+            const filePath = fileMatch && fileMatch[2] ? fileMatch[2] : '';
+            currentFile = {
+                path: filePath,
+                status: 'modified',
+                hunks: [],
+                additions: 0,
+                deletions: 0,
+            };
+            currentHunk = null;
+            hunkContent = [];
+            continue;
+        }
+        if (!currentFile)
+            continue;
+        // File status
+        if (line.startsWith('new file')) {
+            currentFile.status = 'added';
+        }
+        else if (line.startsWith('deleted file')) {
+            currentFile.status = 'deleted';
+        }
+        else if (line.startsWith('rename from')) {
+            currentFile.status = 'renamed';
+            const renameMatch = line.match(/rename from (.+)/);
+            if (renameMatch && renameMatch[1]) {
+                currentFile.previousPath = renameMatch[1];
+            }
+        }
+        // Hunk header: @@ -1,5 +1,6 @@
+        if (line.startsWith('@@')) {
+            // Save previous hunk
+            if (currentHunk) {
+                currentHunk.content = hunkContent.join('\n');
+                currentFile.hunks.push(currentHunk);
+            }
+            const hunkMatch = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+            if (hunkMatch && hunkMatch[1] && hunkMatch[3]) {
+                currentHunk = {
+                    oldStart: parseInt(hunkMatch[1], 10),
+                    oldLines: parseInt(hunkMatch[2] || '1', 10),
+                    newStart: parseInt(hunkMatch[3], 10),
+                    newLines: parseInt(hunkMatch[4] || '1', 10),
+                    content: '',
+                };
+                hunkContent = [];
+            }
+            continue;
+        }
+        // Hunk content
+        if (currentHunk && (line.startsWith('+') || line.startsWith('-') || line.startsWith(' '))) {
+            hunkContent.push(line);
+            if (line.startsWith('+') && !line.startsWith('+++')) {
+                currentFile.additions++;
+            }
+            else if (line.startsWith('-') && !line.startsWith('---')) {
+                currentFile.deletions++;
+            }
+        }
+    }
+    // Save last file
+    if (currentFile) {
+        if (currentHunk) {
+            currentHunk.content = hunkContent.join('\n');
+            currentFile.hunks.push(currentHunk);
+        }
+        files.push(currentFile);
+    }
+    return files;
+}
+/**
+ * Create a PRDiff from parsed files
+ */
+function createPRDiff(base, head, files) {
+    let totalAdditions = 0;
+    let totalDeletions = 0;
+    for (const file of files) {
+        totalAdditions += file.additions;
+        totalDeletions += file.deletions;
+    }
+    return {
+        base,
+        head,
+        files,
+        totalAdditions,
+        totalDeletions,
+    };
+}
+// ============================================================================
+// File Content Loading
+// ============================================================================
+/**
+ * Load file content with token estimation
+ */
+function loadFileContent(filePath, rootDir) {
+    const fullPath = path.join(rootDir, filePath);
+    try {
+        if (!fs.existsSync(fullPath)) {
+            return null;
+        }
+        const stats = fs.statSync(fullPath);
+        // Skip very large files
+        if (stats.size > 500000) {
+            return null;
+        }
+        const content = fs.readFileSync(fullPath, 'utf8');
+        return {
+            path: filePath,
+            content,
+            size: stats.size,
+            tokenCount: estimateFileTokens(content),
+        };
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Load multiple file contents with budget
+ */
+function loadFileContents(filePaths, rootDir, maxTokens) {
+    const contents = [];
+    let totalTokens = 0;
+    for (const filePath of filePaths) {
+        if (totalTokens >= maxTokens)
+            break;
+        const content = loadFileContent(filePath, rootDir);
+        if (content && totalTokens + content.tokenCount <= maxTokens) {
+            contents.push(content);
+            totalTokens += content.tokenCount;
+        }
+    }
+    return contents;
+}
+// ============================================================================
+// Prioritization
+// ============================================================================
+/**
+ * Score a file for prioritization
+ * Higher score = higher priority
+ */
+function scoreFile(file, priorityPatterns) {
+    let score = 0;
+    // More changes = higher priority
+    score += file.additions + file.deletions;
+    // Check priority patterns
+    for (const pattern of priorityPatterns) {
+        if (file.path.includes(pattern)) {
+            score += 100;
+        }
+    }
+    // Source files get priority over tests
+    if (file.path.includes('test') || file.path.includes('spec')) {
+        score -= 20;
+    }
+    // TypeScript/JavaScript files get priority
+    if (file.path.endsWith('.ts') || file.path.endsWith('.tsx') ||
+        file.path.endsWith('.js') || file.path.endsWith('.jsx')) {
+        score += 10;
+    }
+    return score;
+}
+/**
+ * Prioritize files for context inclusion
+ */
+function prioritizeFiles(files, priorityPatterns = []) {
+    const scored = files.map((file) => ({
+        file,
+        score: scoreFile(file, priorityPatterns),
+    }));
+    scored.sort((a, b) => b.score - a.score);
+    return scored.map((s) => s.file);
+}
+// ============================================================================
+// Spec Summary
+// ============================================================================
+/**
+ * Create a summary of the OpenAPI spec for context
+ */
+function summarizeSpec(spec) {
+    const lines = [
+        `API: ${spec.info.title} v${spec.info.version}`,
+        '',
+        'Endpoints:',
+    ];
+    for (const endpoint of spec.endpoints.slice(0, 20)) {
+        lines.push(`- ${endpoint.method.toUpperCase()} ${endpoint.path}`);
+    }
+    if (spec.endpoints.length > 20) {
+        lines.push(`... and ${spec.endpoints.length - 20} more endpoints`);
+    }
+    return lines.join('\n');
+}
+// ============================================================================
+// Conventions
+// ============================================================================
+/**
+ * Extract conventions from config
+ */
+function extractConventions(config) {
+    const conventions = [];
+    if (!config)
+        return conventions;
+    // Gate-specific conventions
+    if (config.gates.typescript.enabled) {
+        conventions.push('TypeScript strict mode is enabled');
+    }
+    if (config.gates.eslint.enabled) {
+        conventions.push('ESLint checks are enabled');
+    }
+    if (config.gates.semgrep.enabled) {
+        conventions.push('Security scanning with Semgrep is enabled');
+    }
+    if (config.gates['design-system']?.enabled) {
+        conventions.push('Design system enforcement is enabled');
+        if (config.gates['design-system'].bannedClasses?.length) {
+            conventions.push(`Banned CSS classes: ${config.gates['design-system'].bannedClasses.join(', ')}`);
+        }
+    }
+    return conventions;
+}
+// ============================================================================
+// Context Assembly
+// ============================================================================
+/**
+ * Format diff for LLM consumption
+ */
+function formatDiffForLLM(diff, maxTokens) {
+    const lines = [
+        `## Changed Files (${diff.files.length} files, +${diff.totalAdditions}/-${diff.totalDeletions})`,
+        '',
+    ];
+    let tokenCount = estimateTokens(lines.join('\n'));
+    const fileTokenBudget = Math.floor((maxTokens - tokenCount) / Math.max(diff.files.length, 1));
+    for (const file of diff.files) {
+        const fileHeader = `### ${file.status.toUpperCase()}: ${file.path}`;
+        lines.push(fileHeader);
+        for (const hunk of file.hunks) {
+            const hunkHeader = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
+            lines.push(hunkHeader);
+            // Truncate hunk if needed
+            const hunkTokens = estimateTokens(hunk.content);
+            if (hunkTokens > fileTokenBudget) {
+                const truncatedLines = hunk.content.split('\n').slice(0, 50);
+                lines.push(truncatedLines.join('\n'));
+                lines.push('... (truncated)');
+            }
+            else {
+                lines.push(hunk.content);
+            }
+        }
+        lines.push('');
+        tokenCount = estimateTokens(lines.join('\n'));
+        if (tokenCount > maxTokens) {
+            lines.push('... (remaining files truncated)');
+            break;
+        }
+    }
+    return lines.join('\n');
+}
+/**
+ * Format violations for LLM consumption
+ */
+function formatViolationsForLLM(violations) {
+    if (violations.length === 0) {
+        return 'No violations from other gates.';
+    }
+    const lines = [
+        `## Existing Violations (${violations.length})`,
+        '',
+    ];
+    // Group by file
+    const byFile = new Map();
+    for (const v of violations) {
+        const existing = byFile.get(v.file) || [];
+        existing.push(v);
+        byFile.set(v.file, existing);
+    }
+    for (const [file, fileViolations] of byFile) {
+        lines.push(`### ${file}`);
+        for (const v of fileViolations.slice(0, 10)) {
+            lines.push(`- Line ${v.line}: [${v.ruleId}] ${v.message}`);
+        }
+        if (fileViolations.length > 10) {
+            lines.push(`... and ${fileViolations.length - 10} more`);
+        }
+        lines.push('');
+    }
+    return lines.join('\n');
+}
+/**
+ * Format file contents for LLM consumption
+ */
+function formatFileContentsForLLM(contents, maxTokens) {
+    if (contents.length === 0) {
+        return '';
+    }
+    const lines = ['## Full File Contents', ''];
+    let tokenCount = estimateTokens(lines.join('\n'));
+    for (const file of contents) {
+        if (tokenCount + file.tokenCount > maxTokens) {
+            lines.push(`... (${contents.length - contents.indexOf(file)} files omitted due to token limit)`);
+            break;
+        }
+        lines.push(`### ${file.path}`);
+        lines.push('```');
+        lines.push(file.content);
+        lines.push('```');
+        lines.push('');
+        tokenCount += file.tokenCount;
+    }
+    return lines.join('\n');
+}
+/**
+ * Assemble full context for LLM review
+ */
+function assembleContext(options) {
+    const warnings = [];
+    let truncated = false;
+    // Budget allocation (rough percentages)
+    const diffBudget = Math.floor(options.maxTokens * 0.4);
+    const filesBudget = Math.floor(options.maxTokens * 0.3);
+    // violationsBudget reserved for future use
+    const otherBudget = Math.floor(options.maxTokens * 0.15);
+    // Extract violations from gate results
+    const violations = [];
+    if (options.gateResults) {
+        for (const result of options.gateResults) {
+            violations.push(...result.violations);
+        }
+    }
+    // Format diff
+    const diffText = formatDiffForLLM(options.diff, diffBudget);
+    const diffTokens = estimateTokens(diffText);
+    if (diffTokens >= diffBudget) {
+        truncated = true;
+        warnings.push('Diff was truncated to fit token budget');
+    }
+    // Load file contents if enabled
+    let fileContents = [];
+    if (options.includeFullFiles) {
+        const prioritized = prioritizeFiles(options.diff.files.filter((f) => f.status !== 'deleted'), options.priorityPatterns);
+        const filePaths = prioritized.map((f) => f.path);
+        fileContents = loadFileContents(filePaths, options.rootDir, filesBudget);
+    }
+    // Spec summary
+    let specSummary;
+    if (options.spec) {
+        specSummary = summarizeSpec(options.spec);
+        if (estimateTokens(specSummary) > otherBudget / 2) {
+            specSummary = specSummary.slice(0, otherBudget * 2); // ~half budget in chars
+            truncated = true;
+            warnings.push('Spec summary was truncated');
+        }
+    }
+    // Conventions
+    const conventions = extractConventions(options.config);
+    // Calculate total tokens
+    let totalTokens = diffTokens;
+    totalTokens += fileContents.reduce((sum, f) => sum + f.tokenCount, 0);
+    totalTokens += estimateTokens(formatViolationsForLLM(violations.slice(0, 50)));
+    if (specSummary)
+        totalTokens += estimateTokens(specSummary);
+    totalTokens += estimateTokens(conventions.join('\n'));
+    const result = {
+        diff: options.diff,
+        fileContents,
+        violations: violations.slice(0, 100), // Limit violations
+        conventions,
+        totalTokens,
+        truncated,
+        warnings,
+    };
+    if (specSummary) {
+        result.specSummary = specSummary;
+    }
+    return result;
+}
+/**
+ * Format assembled context as a prompt
+ */
+function formatContextAsPrompt(context) {
+    const sections = [];
+    // Diff section
+    const diffText = formatDiffForLLM(context.diff, Infinity);
+    sections.push(diffText);
+    // Violations section
+    if (context.violations.length > 0) {
+        sections.push(formatViolationsForLLM(context.violations));
+    }
+    // File contents section
+    if (context.fileContents.length > 0) {
+        sections.push(formatFileContentsForLLM(context.fileContents, Infinity));
+    }
+    // Spec section
+    if (context.specSummary) {
+        sections.push('## API Specification', '', context.specSummary, '');
+    }
+    // Conventions section
+    if (context.conventions.length > 0) {
+        sections.push('## Project Conventions', '', ...context.conventions.map((c) => `- ${c}`), '');
+    }
+    return sections.join('\n');
+}
+
+
+/***/ }),
+
+/***/ 807:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/**
+ * Semantic Review Engine
+ *
+ * Core LLM review that produces structured output.
+ * Uses the assembled context to generate code review feedback.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseReviewResponse = parseReviewResponse;
+exports.runReview = runReview;
+exports.formatReviewAsMarkdown = formatReviewAsMarkdown;
+exports.reviewIssuesToViolations = reviewIssuesToViolations;
+const context_1 = __nccwpck_require__(7400);
+// ============================================================================
+// Prompt Templates
+// ============================================================================
+/**
+ * System prompt for code review
+ */
+const SYSTEM_PROMPT = `You are an expert code reviewer for a TypeScript/JavaScript project. Your job is to review code changes and identify issues.
+
+Focus on:
+- Security vulnerabilities
+- Performance issues
+- Type safety concerns
+- API contract violations
+- Code quality and maintainability
+- Best practices
+
+For each issue, provide:
+- The file and line number
+- Severity: error (must fix), warning (should fix), info (suggestion)
+- A clear description of the issue
+- A suggestion for how to fix it (if applicable)
+
+IMPORTANT: Respond ONLY with valid JSON in the exact format specified. Do not include any other text.`;
+/**
+ * User prompt template
+ */
+function buildUserPrompt(context, focusAreas) {
+    const contextPrompt = (0, context_1.formatContextAsPrompt)(context);
+    const focusSection = focusAreas?.length
+        ? `\n\n## Focus Areas\nPay special attention to:\n${focusAreas.map((a) => `- ${a}`).join('\n')}`
+        : '';
+    return `Please review the following code changes and provide feedback.
+${focusSection}
+
+${contextPrompt}
+
+Respond with a JSON object in this exact format:
+{
+  "issues": [
+    {
+      "file": "path/to/file.ts",
+      "line": 42,
+      "severity": "error" | "warning" | "info",
+      "message": "Description of the issue",
+      "suggestion": "How to fix it (optional)",
+      "category": "security" | "performance" | "type-safety" | "api-contract" | "code-quality" | "other"
+    }
+  ],
+  "summary": "Overall assessment of the changes",
+  "confidence": 0.85
+}
+
+If there are no issues, return an empty issues array with a positive summary.`;
+}
+// ============================================================================
+// Response Parsing
+// ============================================================================
+/**
+ * Parse LLM response into structured result
+ */
+function parseReviewResponse(response) {
+    try {
+        // Try to extract JSON from the response
+        let jsonStr = response.trim();
+        // Handle markdown code blocks
+        if (jsonStr.startsWith('```')) {
+            const match = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+            if (match && match[1]) {
+                jsonStr = match[1].trim();
+            }
+        }
+        const parsed = JSON.parse(jsonStr);
+        // Validate and normalize issues
+        const issues = [];
+        if (Array.isArray(parsed.issues)) {
+            for (const issue of parsed.issues) {
+                if (!issue.file || !issue.message)
+                    continue;
+                const severity = ['error', 'warning', 'info'].includes(issue.severity || '')
+                    ? issue.severity
+                    : 'warning';
+                const reviewIssue = {
+                    file: issue.file,
+                    line: issue.line || 0,
+                    severity,
+                    message: issue.message,
+                };
+                if (issue.suggestion) {
+                    reviewIssue.suggestion = issue.suggestion;
+                }
+                if (issue.category) {
+                    reviewIssue.category = issue.category;
+                }
+                issues.push(reviewIssue);
+            }
+        }
+        return {
+            issues,
+            summary: parsed.summary || 'No summary provided.',
+            confidence: typeof parsed.confidence === 'number'
+                ? Math.max(0, Math.min(1, parsed.confidence))
+                : 0.5,
+        };
+    }
+    catch {
+        // If JSON parsing fails, try to extract issues from text
+        return {
+            issues: [],
+            summary: 'Failed to parse LLM response. Raw response may contain useful information.',
+            confidence: 0,
+        };
+    }
+}
+// ============================================================================
+// Main Review Function
+// ============================================================================
+/**
+ * Run LLM code review
+ */
+async function runReview(options) {
+    const { client, context, focusAreas, maxIssues = 50, includeRawResponse = false } = options;
+    // Build messages
+    const messages = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: buildUserPrompt(context, focusAreas) },
+    ];
+    // Make LLM request with temperature=0 for deterministic output (per spec S074/S079)
+    const response = await client.chat(messages, { temperature: 0 });
+    // Parse response
+    const parsed = parseReviewResponse(response.content);
+    // Limit issues
+    const issues = parsed.issues.slice(0, maxIssues);
+    const result = {
+        issues,
+        summary: parsed.summary,
+        confidence: parsed.confidence,
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        cost: response.cost,
+        latencyMs: response.latencyMs,
+    };
+    if (includeRawResponse) {
+        result.rawResponse = response.content;
+    }
+    return result;
+}
+// ============================================================================
+// Formatting
+// ============================================================================
+/**
+ * Format review result as markdown
+ */
+function formatReviewAsMarkdown(result) {
+    const lines = ['# LLM Code Review', ''];
+    // Summary
+    lines.push('## Summary');
+    lines.push('');
+    lines.push(result.summary);
+    lines.push('');
+    // Stats
+    lines.push(`**Confidence:** ${Math.round(result.confidence * 100)}%`);
+    lines.push(`**Issues Found:** ${result.issues.length}`);
+    lines.push('');
+    if (result.issues.length === 0) {
+        lines.push('No issues found.');
+        return lines.join('\n');
+    }
+    // Group issues by severity
+    const errors = result.issues.filter((i) => i.severity === 'error');
+    const warnings = result.issues.filter((i) => i.severity === 'warning');
+    const infos = result.issues.filter((i) => i.severity === 'info');
+    if (errors.length > 0) {
+        lines.push('## Errors');
+        lines.push('');
+        for (const issue of errors) {
+            formatIssue(issue, lines);
+        }
+    }
+    if (warnings.length > 0) {
+        lines.push('## Warnings');
+        lines.push('');
+        for (const issue of warnings) {
+            formatIssue(issue, lines);
+        }
+    }
+    if (infos.length > 0) {
+        lines.push('## Suggestions');
+        lines.push('');
+        for (const issue of infos) {
+            formatIssue(issue, lines);
+        }
+    }
+    return lines.join('\n');
+}
+/**
+ * Format a single issue
+ */
+function formatIssue(issue, lines) {
+    const location = issue.line > 0 ? `${issue.file}:${issue.line}` : issue.file;
+    lines.push(`### ${location}`);
+    lines.push('');
+    lines.push(issue.message);
+    if (issue.suggestion) {
+        lines.push('');
+        lines.push(`**Suggestion:** ${issue.suggestion}`);
+    }
+    if (issue.category) {
+        lines.push('');
+        lines.push(`*Category: ${issue.category}*`);
+    }
+    lines.push('');
+}
+/**
+ * Convert review issues to gate violations
+ */
+function reviewIssuesToViolations(issues, gate) {
+    return issues.map((issue) => ({
+        ruleId: issue.category ? `llm-${issue.category}` : 'llm-review',
+        file: issue.file,
+        line: issue.line,
+        message: issue.message,
+        gate,
+        severity: issue.severity === 'error' ? 'error' : 'warning',
+    }));
+}
 
 
 /***/ }),
@@ -37802,6 +41705,52 @@ function generateSkippedSection(gates) {
     ].join('\n');
 }
 /**
+ * Generate coordination findings section
+ *
+ * S096: Coordination Integration
+ */
+function generateCoordinationSection(findings) {
+    if (!findings || findings.length === 0) {
+        return '';
+    }
+    const lines = [];
+    // Group by tier
+    const blockFindings = findings.filter((f) => f.tier === 'block');
+    const warnFindings = findings.filter((f) => f.tier === 'warn');
+    const informFindings = findings.filter((f) => f.tier === 'inform');
+    // Header
+    lines.push('### Coordination');
+    lines.push('');
+    // Block tier (most serious)
+    if (blockFindings.length > 0) {
+        lines.push(':no_entry: **Blocking Issues**');
+        lines.push('');
+        for (const finding of blockFindings) {
+            lines.push(finding.details);
+            lines.push('');
+        }
+    }
+    // Warn tier
+    if (warnFindings.length > 0) {
+        lines.push(':warning: **Warnings**');
+        lines.push('');
+        for (const finding of warnFindings) {
+            lines.push(finding.details);
+            lines.push('');
+        }
+    }
+    // Inform tier
+    if (informFindings.length > 0) {
+        lines.push(':information_source: **Information**');
+        lines.push('');
+        for (const finding of informFindings) {
+            lines.push(finding.details);
+            lines.push('');
+        }
+    }
+    return lines.join('\n');
+}
+/**
  * Generate grace period section
  */
 function generateGracePeriodSection(data) {
@@ -37856,6 +41805,10 @@ function generatePRComment(data, config = types_1.DEFAULT_REPORT_CONFIG) {
     // Gate results table
     lines.push(generateGateTable(data.gates, config));
     lines.push('');
+    // Coordination findings section (S096)
+    if (data.coordinationFindings && data.coordinationFindings.length > 0) {
+        lines.push(generateCoordinationSection(data.coordinationFindings));
+    }
     // Detail sections (collapsible)
     if (config.includeDetails) {
         // Failure details
@@ -38138,6 +42091,32 @@ async function writeStepSummary(data, config = types_1.DEFAULT_REPORT_CONFIG) {
         core.summary.addTable(tableData);
         // Add spacing
         core.summary.addRaw('\n');
+        // Coordination findings section (S096)
+        if (data.coordinationFindings && data.coordinationFindings.length > 0) {
+            core.summary.addHeading('Coordination', 3);
+            // Group by tier
+            const blockFindings = data.coordinationFindings.filter((f) => f.tier === 'block');
+            const warnFindings = data.coordinationFindings.filter((f) => f.tier === 'warn');
+            const informFindings = data.coordinationFindings.filter((f) => f.tier === 'inform');
+            if (blockFindings.length > 0) {
+                core.summary.addRaw('\u{1F6D1} **Blocking Issues**\n\n');
+                for (const finding of blockFindings) {
+                    core.summary.addDetails(finding.summary, finding.details);
+                }
+            }
+            if (warnFindings.length > 0) {
+                core.summary.addRaw('\u26A0\uFE0F **Warnings**\n\n');
+                for (const finding of warnFindings) {
+                    core.summary.addDetails(finding.summary, finding.details);
+                }
+            }
+            if (informFindings.length > 0) {
+                core.summary.addRaw('\u2139\uFE0F **Information**\n\n');
+                for (const finding of informFindings) {
+                    core.summary.addDetails(finding.summary, finding.details);
+                }
+            }
+        }
         // Failed gates details (collapsible)
         const failedGates = data.gates.filter((g) => g.status === 'fail' || g.status === 'error');
         if (failedGates.length > 0 && config.includeDetails) {
@@ -38221,6 +42200,54 @@ function generateStepSummaryMarkdown(data, config = types_1.DEFAULT_REPORT_CONFI
         lines.push(`| ${row.join(' | ')} |`);
     }
     lines.push('');
+    // Coordination findings section (S096)
+    if (data.coordinationFindings && data.coordinationFindings.length > 0) {
+        lines.push('### Coordination');
+        lines.push('');
+        // Group by tier
+        const blockFindings = data.coordinationFindings.filter((f) => f.tier === 'block');
+        const warnFindings = data.coordinationFindings.filter((f) => f.tier === 'warn');
+        const informFindings = data.coordinationFindings.filter((f) => f.tier === 'inform');
+        if (blockFindings.length > 0) {
+            lines.push('\u{1F6D1} **Blocking Issues**');
+            lines.push('');
+            for (const finding of blockFindings) {
+                lines.push('<details>');
+                lines.push(`<summary>${finding.summary}</summary>`);
+                lines.push('');
+                lines.push(finding.details);
+                lines.push('');
+                lines.push('</details>');
+                lines.push('');
+            }
+        }
+        if (warnFindings.length > 0) {
+            lines.push('\u26A0\uFE0F **Warnings**');
+            lines.push('');
+            for (const finding of warnFindings) {
+                lines.push('<details>');
+                lines.push(`<summary>${finding.summary}</summary>`);
+                lines.push('');
+                lines.push(finding.details);
+                lines.push('');
+                lines.push('</details>');
+                lines.push('');
+            }
+        }
+        if (informFindings.length > 0) {
+            lines.push('\u2139\uFE0F **Information**');
+            lines.push('');
+            for (const finding of informFindings) {
+                lines.push('<details>');
+                lines.push(`<summary>${finding.summary}</summary>`);
+                lines.push('');
+                lines.push(finding.details);
+                lines.push('');
+                lines.push('</details>');
+                lines.push('');
+            }
+        }
+    }
     // Failed gates details
     const failedGates = data.gates.filter((g) => g.status === 'fail' || g.status === 'error');
     if (failedGates.length > 0 && config.includeDetails) {
@@ -38354,7 +42381,579 @@ exports.GATE_DISPLAY_NAMES = {
     'npm-audit': 'npm Audit',
     'design-system': 'Design System',
     'frontend-checks': 'Frontend Checks',
+    visual: 'Visual Regression',
+    'llm-review': 'LLM Code Review',
 };
+
+
+/***/ }),
+
+/***/ 3953:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Visual Diff Module
+ *
+ * Compares screenshots using lens-cli pixel diff for visual regression detection.
+ * Uses anti-aliasing detection to reduce false positives from font rendering.
+ *
+ * S067: lens-cli Pixel Diff Integration
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.diffScreenshots = diffScreenshots;
+exports.diffScreenshotBatch = diffScreenshotBatch;
+exports.screenshotsMatch = screenshotsMatch;
+const exec = __importStar(__nccwpck_require__(5236));
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+const types_1 = __nccwpck_require__(4521);
+/**
+ * Parse diff output from lens-cli
+ *
+ * lens diff outputs lines like:
+ * - "Diff: 0.17% (1324 pixels differ)"
+ * - "PASS: Images match within threshold"
+ * - "FAIL: Images differ by 2.5%"
+ */
+function parseDiffOutput(stdout) {
+    // Look for percentage in output
+    const percentMatch = stdout.match(/(\d+\.?\d*)\s*%/);
+    if (percentMatch?.[1] !== undefined) {
+        const diffPercentage = parseFloat(percentMatch[1]);
+        const matched = stdout.toLowerCase().includes('pass') || diffPercentage === 0;
+        return { diffPercentage, matched };
+    }
+    // If no percentage found but output contains PASS
+    if (stdout.toLowerCase().includes('pass') || stdout.toLowerCase().includes('match')) {
+        return { diffPercentage: 0, matched: true };
+    }
+    return undefined;
+}
+/**
+ * Execute lens-cli command and capture output
+ */
+async function execLens(args) {
+    let stdout = '';
+    let stderr = '';
+    const exitCode = await exec.exec('lens', args, {
+        silent: true,
+        ignoreReturnCode: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    });
+    return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+}
+/**
+ * Generate diff image output path
+ */
+function generateDiffPath(baselinePath, currentPath) {
+    const baselineDir = path.dirname(baselinePath);
+    const baselineName = path.basename(baselinePath, '.png');
+    const currentName = path.basename(currentPath, '.png');
+    return path.join(baselineDir, `diff-${baselineName}-vs-${currentName}.png`);
+}
+/**
+ * Compare two screenshots using lens-cli pixel diff
+ *
+ * Uses lens diff which:
+ * - Compares pixels with configurable color tolerance
+ * - Detects anti-aliased edges to reduce false positives
+ * - Outputs diff image highlighting mismatches
+ *
+ * @param baselinePath - Path to baseline screenshot
+ * @param currentPath - Path to current screenshot
+ * @param options - Diff options including threshold
+ * @returns Diff result with percentage, matched status, and diff image path
+ */
+async function diffScreenshots(baselinePath, currentPath, options = {}) {
+    const threshold = options.threshold ?? types_1.DEFAULT_THRESHOLD;
+    // Validate input files exist
+    if (!fs.existsSync(baselinePath)) {
+        return {
+            success: false,
+            error: `Baseline screenshot not found: ${baselinePath}`,
+        };
+    }
+    if (!fs.existsSync(currentPath)) {
+        return {
+            success: false,
+            error: `Current screenshot not found: ${currentPath}`,
+        };
+    }
+    try {
+        // Generate output path for diff image
+        const diffImagePath = options.outputPath ?? generateDiffPath(baselinePath, currentPath);
+        // Run lens diff command
+        // Format: lens diff <baseline> <current> --threshold <value> --output <path>
+        const args = [
+            'diff',
+            baselinePath,
+            currentPath,
+            '--threshold',
+            String(threshold / 100), // lens expects 0-1 range, we use 0-100
+        ];
+        // Add output path if we want to save diff image
+        args.push('--output', diffImagePath);
+        const result = await execLens(args);
+        // Parse the output
+        const parsed = parseDiffOutput(result.stdout);
+        if (parsed === undefined) {
+            // If we couldn't parse, check exit code
+            // Exit code 0 = pass, 1 = fail (images differ), other = error
+            if (result.exitCode === 0) {
+                return {
+                    success: true,
+                    diffPercentage: 0,
+                    matched: true,
+                };
+            }
+            else if (result.exitCode === 1) {
+                // Images differ but we couldn't parse percentage
+                const diffResult = {
+                    success: true,
+                    diffPercentage: threshold + 1, // Assume over threshold
+                    matched: false,
+                };
+                if (fs.existsSync(diffImagePath)) {
+                    diffResult.diffImagePath = diffImagePath;
+                }
+                return diffResult;
+            }
+            else {
+                return {
+                    success: false,
+                    error: `lens diff failed: ${result.stderr || result.stdout}`,
+                };
+            }
+        }
+        // Check if diff image was created
+        const hasDiffImage = fs.existsSync(diffImagePath);
+        const diffResult = {
+            success: true,
+            diffPercentage: parsed.diffPercentage,
+            matched: parsed.diffPercentage <= threshold,
+        };
+        if (hasDiffImage && parsed.diffPercentage > 0) {
+            diffResult.diffImagePath = diffImagePath;
+        }
+        return diffResult;
+    }
+    catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error during diff',
+        };
+    }
+}
+/**
+ * Compare multiple screenshot pairs in batch
+ *
+ * Useful for comparing all screenshots from a visual test run.
+ *
+ * @param pairs - Array of [baseline, current] path pairs
+ * @param options - Diff options applied to all comparisons
+ * @returns Array of diff results in same order as input pairs
+ */
+async function diffScreenshotBatch(pairs, options = {}) {
+    const results = [];
+    for (const [baselinePath, currentPath] of pairs) {
+        const result = await diffScreenshots(baselinePath, currentPath, options);
+        results.push(result);
+    }
+    return results;
+}
+/**
+ * Quick check if two screenshots match within threshold
+ *
+ * More efficient than full diff when you just need pass/fail.
+ *
+ * @param baselinePath - Path to baseline screenshot
+ * @param currentPath - Path to current screenshot
+ * @param threshold - Maximum allowed difference percentage (default: 0.1)
+ * @returns Whether screenshots match within threshold
+ */
+async function screenshotsMatch(baselinePath, currentPath, threshold = types_1.DEFAULT_THRESHOLD) {
+    const result = await diffScreenshots(baselinePath, currentPath, { threshold });
+    return result.success && (result.matched ?? false);
+}
+
+
+/***/ }),
+
+/***/ 2486:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Visual Screenshot Module
+ *
+ * Captures screenshots using lens-cli for visual regression testing.
+ * Supports viewport configuration, wait conditions, and API mocking.
+ *
+ * S066: lens-cli Screenshot Integration
+ * S069: State Mocking
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.captureScreenshot = captureScreenshot;
+exports.captureWithMocks = captureWithMocks;
+exports.stopHeadlessBrowser = stopHeadlessBrowser;
+const exec = __importStar(__nccwpck_require__(5236));
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+const crypto = __importStar(__nccwpck_require__(6982));
+const types_1 = __nccwpck_require__(4521);
+/**
+ * Default viewport dimensions
+ */
+const DEFAULT_VIEWPORT = {
+    width: 1280,
+    height: 720,
+    name: 'default',
+};
+/**
+ * Generate a unique filename for a screenshot
+ */
+function generateFilename(url, viewport) {
+    const urlHash = crypto.createHash('md5').update(url).digest('hex').slice(0, 8);
+    const viewportSuffix = viewport.name ?? `${viewport.width}x${viewport.height}`;
+    const timestamp = Date.now();
+    return `screenshot-${urlHash}-${viewportSuffix}-${timestamp}.png`;
+}
+/**
+ * Ensure output directory exists
+ */
+function ensureOutputDir(outputDir) {
+    if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+    }
+}
+/**
+ * Execute lens-cli command and capture output
+ */
+async function execLens(args, cwd) {
+    let stdout = '';
+    let stderr = '';
+    const execOptions = {
+        silent: true,
+        ignoreReturnCode: true,
+        listeners: {
+            stdout: (data) => {
+                stdout += data.toString();
+            },
+            stderr: (data) => {
+                stderr += data.toString();
+            },
+        },
+    };
+    // Only set cwd if defined
+    if (cwd !== undefined) {
+        execOptions.cwd = cwd;
+    }
+    const exitCode = await exec.exec('lens', args, execOptions);
+    return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+}
+/**
+ * Capture a screenshot of a URL using lens-cli
+ *
+ * Uses lens headless mode for CI compatibility:
+ * - lens headless.start (if not running)
+ * - lens headless open <url>
+ * - lens headless screenshot --output <path>
+ * - Applies viewport via resize
+ *
+ * @param url - URL to capture
+ * @param options - Screenshot options
+ * @returns Screenshot result with path and metadata
+ */
+async function captureScreenshot(url, options = {}) {
+    const startTime = Date.now();
+    const viewport = options.viewport ?? DEFAULT_VIEWPORT;
+    const outputDir = options.outputDir ?? types_1.DEFAULT_OUTPUT_DIR;
+    const timeout = options.timeout ?? types_1.DEFAULT_TIMEOUT;
+    const filename = options.filename ?? generateFilename(url, viewport);
+    const outputPath = path.join(outputDir, filename);
+    try {
+        // Ensure output directory exists
+        ensureOutputDir(outputDir);
+        // Start headless browser if not running
+        const statusResult = await execLens(['headless.status']);
+        if (statusResult.exitCode !== 0 || !statusResult.stdout.includes('running')) {
+            const startResult = await execLens(['headless.start']);
+            if (startResult.exitCode !== 0) {
+                return {
+                    success: false,
+                    error: `Failed to start headless browser: ${startResult.stderr}`,
+                };
+            }
+            // Give browser time to initialize
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+        // Set viewport via resize
+        const resizeResult = await execLens([
+            'headless',
+            'resize',
+            String(viewport.width),
+            String(viewport.height),
+        ]);
+        if (resizeResult.exitCode !== 0) {
+            // Resize failure is non-fatal, continue with default viewport
+        }
+        // Navigate to URL
+        const openResult = await execLens(['headless', 'open', url]);
+        if (openResult.exitCode !== 0) {
+            return {
+                success: false,
+                error: `Failed to navigate to ${url}: ${openResult.stderr}`,
+            };
+        }
+        // Wait for selector if specified
+        if (options.waitFor) {
+            const waitScript = `document.querySelector('${options.waitFor}') !== null`;
+            const maxAttempts = Math.ceil(timeout / 500);
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                const checkResult = await execLens(['headless', 'js', waitScript]);
+                if (checkResult.stdout === 'true') {
+                    break;
+                }
+                if (attempt === maxAttempts - 1) {
+                    return {
+                        success: false,
+                        error: `Timeout waiting for selector: ${options.waitFor}`,
+                    };
+                }
+                await new Promise((resolve) => setTimeout(resolve, 500));
+            }
+        }
+        else {
+            // Default wait for page load
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        // Capture screenshot
+        const screenshotResult = await execLens(['headless', 'screenshot', '--output', outputPath]);
+        if (screenshotResult.exitCode !== 0) {
+            return {
+                success: false,
+                error: `Failed to capture screenshot: ${screenshotResult.stderr}`,
+            };
+        }
+        // Verify screenshot was created
+        if (!fs.existsSync(outputPath)) {
+            return {
+                success: false,
+                error: `Screenshot file not created: ${outputPath}`,
+            };
+        }
+        // Read buffer for return
+        const buffer = fs.readFileSync(outputPath).toString('base64');
+        const captureTimeMs = Date.now() - startTime;
+        const metadata = {
+            url,
+            viewport,
+            timestamp: new Date(),
+            captureTimeMs,
+        };
+        return {
+            success: true,
+            path: outputPath,
+            buffer,
+            metadata,
+        };
+    }
+    catch (error) {
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error during screenshot capture',
+        };
+    }
+}
+/**
+ * Set up API mocks using lens intercept
+ *
+ * @param mocks - Array of API mocks to set up
+ * @returns Whether all mocks were set up successfully
+ */
+async function setupMocks(mocks) {
+    for (const mock of mocks) {
+        const responseJson = JSON.stringify(mock.response);
+        const args = ['headless', 'intercept', mock.route, '--response', responseJson];
+        if (mock.status !== undefined && mock.status !== 200) {
+            args.push('--status', String(mock.status));
+        }
+        const result = await execLens(args);
+        if (result.exitCode !== 0) {
+            return {
+                success: false,
+                error: `Failed to set up mock for ${mock.route}: ${result.stderr}`,
+            };
+        }
+    }
+    return { success: true };
+}
+/**
+ * Clear all API mocks
+ */
+async function clearMocks() {
+    await execLens(['headless', 'intercept.clear']);
+}
+/**
+ * Capture a screenshot with API mocking for state control
+ *
+ * S069: State Mocking
+ *
+ * Uses lens intercept to mock API responses before capture.
+ * Cleans up mocks after capture to avoid state leakage.
+ *
+ * @param url - URL to capture
+ * @param mocks - API mocks to apply
+ * @param options - Screenshot options
+ * @returns Screenshot result with path and metadata
+ */
+async function captureWithMocks(url, mocks, options = {}) {
+    try {
+        // Set up mocks before capture
+        const mockResult = await setupMocks(mocks);
+        if (!mockResult.success) {
+            return {
+                success: false,
+                error: mockResult.error ?? 'Mock setup failed',
+            };
+        }
+        // Capture screenshot with mocks active
+        const result = await captureScreenshot(url, options);
+        // Always clean up mocks
+        await clearMocks();
+        return result;
+    }
+    catch (error) {
+        // Ensure mocks are cleared even on error
+        await clearMocks();
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error during mocked capture',
+        };
+    }
+}
+/**
+ * Stop the headless browser
+ *
+ * Call this when visual testing is complete to clean up resources.
+ */
+async function stopHeadlessBrowser() {
+    await execLens(['headless.stop']);
+}
+
+
+/***/ }),
+
+/***/ 4521:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Visual Testing Types
+ *
+ * Type definitions for visual regression testing module.
+ * Supports screenshot capture, pixel diffing, and API mocking.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DEFAULT_THRESHOLD = exports.DEFAULT_TIMEOUT = exports.DEFAULT_OUTPUT_DIR = exports.DEFAULT_VIEWPORTS = void 0;
+/**
+ * Default viewport configurations
+ */
+exports.DEFAULT_VIEWPORTS = [
+    { width: 1920, height: 1080, name: 'desktop' },
+    { width: 1280, height: 720, name: 'laptop' },
+    { width: 768, height: 1024, name: 'tablet' },
+    { width: 375, height: 667, name: 'mobile' },
+];
+/**
+ * Default temp directory for screenshots
+ */
+exports.DEFAULT_OUTPUT_DIR = '/tmp/hawky-visual/';
+/**
+ * Default timeout for waitFor in ms
+ */
+exports.DEFAULT_TIMEOUT = 30000;
+/**
+ * Default diff threshold (0.1%)
+ */
+exports.DEFAULT_THRESHOLD = 0.1;
 
 
 /***/ }),

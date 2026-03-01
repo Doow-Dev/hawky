@@ -131,15 +131,15 @@ export {
   type FeedbackEntry,
   type FeedbackMetrics,
   type CategoryMetrics,
-  type FeedbackFile,
   // Constants
   DEFAULT_FEEDBACK_PATH,
-  // Functions
-  loadFeedback,
-  saveFeedback,
-  createEmptyFeedback,
+  // Functions (JSONL append-only format)
+  loadFeedbackEntries,
+  appendFeedbackEntry,
+  appendFeedbackEntries,
   recordFeedback,
   recordFeedbackBatch,
   computeMetrics,
+  loadAndComputeMetrics,
   formatMetricsAsMarkdown,
 } from './feedback';

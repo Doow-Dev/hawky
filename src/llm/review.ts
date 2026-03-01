@@ -251,8 +251,8 @@ export async function runReview(options: ReviewOptions): Promise<LLMReviewResult
     { role: 'user', content: buildUserPrompt(context, focusAreas) },
   ];
 
-  // Make LLM request
-  const response = await client.chat(messages);
+  // Make LLM request with temperature=0 for deterministic output (per spec S074/S079)
+  const response = await client.chat(messages, { temperature: 0 });
 
   // Parse response
   const parsed = parseReviewResponse(response.content);
