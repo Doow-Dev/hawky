@@ -85,3 +85,15 @@ export {
   generateGitHubLineLink,
   generateLLMStatusBadge,
 } from './pr-comment-formatter';
+
+export {
+  // Types
+  type ReviewComment,
+  type GitHubReview,
+  type ChangeRequestOptions,
+  // Functions
+  generateChangeRequests,
+  buildIssueCommentBody,
+  buildComplianceCommentBody,
+  formatChangeRequestsAsMarkdown,
+} from './change-requests';
