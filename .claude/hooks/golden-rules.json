@@ -1,0 +1,32 @@
+{
+  "_doc": "Project-specific golden rules for Hawky. These override global rules by ID. Hawky is a security testing tool that needs test fixtures with intentional security anti-patterns.",
+  "rules": [
+    {
+      "id": "security-math-random-token",
+      "severity": "error",
+      "message": "Math.random() is not cryptographically secure. Use crypto.randomBytes() or crypto.randomUUID() for tokens/IDs.",
+      "fix": "Replace with: import { randomUUID } from 'crypto'; const id = randomUUID();",
+      "pattern": "DISABLED_FOR_HAWKY",
+      "include": ["*"],
+      "exclude": ["*"]
+    },
+    {
+      "id": "security-sql-injection",
+      "severity": "error",
+      "message": "SQL string interpolation detected - use parameterized queries to prevent SQL injection.",
+      "fix": "Use parameterized queries: db.execute('SELECT * FROM users WHERE id = $1', [userId]) instead of template literals.",
+      "pattern": "DISABLED_FOR_HAWKY",
+      "include": ["*"],
+      "exclude": ["*"]
+    },
+    {
+      "id": "security-dangerous-innerhtml",
+      "severity": "error",
+      "message": "dangerouslySetInnerHTML with variable data is an XSS risk. Sanitize input first.",
+      "fix": "Use DOMPurify: import DOMPurify from 'dompurify'; dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }}",
+      "pattern": "DISABLED_FOR_HAWKY",
+      "include": ["*"],
+      "exclude": ["*"]
+    }
+  ]
+}

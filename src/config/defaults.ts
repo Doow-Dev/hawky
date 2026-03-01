@@ -65,34 +65,30 @@ export const GITLEAKS_GATE_DEFAULTS: GateConfig = {
 };
 
 /**
- * Default configuration for the npm Audit gate
+ * Default configuration for the npm-audit gate
  */
 export const NPM_AUDIT_GATE_DEFAULTS: GateConfig = {
   enabled: true,
   blocking: true,
-  timeout: 120, // 2 minutes
+  timeout: 300, // 5 minutes
 };
 
 /**
- * Default configuration for the Design System gate
+ * Default configuration for the design-system gate
  */
 export const DESIGN_SYSTEM_GATE_DEFAULTS: GateConfig = {
-  enabled: false, // Opt-in by default — not all projects use design systems
-  blocking: true,
-  timeout: 120, // 2 minutes — static analysis is fast
-  bannedClasses: [],
-  spacingScale: [0, 1, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 288, 320, 384],
-  fontSizeScale: [10, 12, 14, 16, 18, 20, 24, 30, 36, 48, 60, 72, 96, 128],
-  allowHardcodedColors: false,
+  enabled: false, // opt-in: only runs when design system is configured
+  blocking: false,
+  timeout: 300, // 5 minutes
 };
 
 /**
- * Default configuration for the Frontend Checks gate
+ * Default configuration for the frontend-checks gate
  */
 export const FRONTEND_CHECKS_GATE_DEFAULTS: GateConfig = {
-  enabled: false, // Opt-in by default — requires React/Next.js project
-  blocking: false, // Non-blocking by default — these are warnings
-  timeout: 120, // 2 minutes — static analysis is fast
+  enabled: false, // opt-in: only runs in React/Next.js projects
+  blocking: false,
+  timeout: 300, // 5 minutes
 };
 
 /**

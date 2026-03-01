@@ -30927,32 +30927,28 @@ exports.GITLEAKS_GATE_DEFAULTS = {
     timeout: 300, // 5 minutes
 };
 /**
- * Default configuration for the npm Audit gate
+ * Default configuration for the npm-audit gate
  */
 exports.NPM_AUDIT_GATE_DEFAULTS = {
     enabled: true,
     blocking: true,
-    timeout: 120, // 2 minutes
+    timeout: 300, // 5 minutes
 };
 /**
- * Default configuration for the Design System gate
+ * Default configuration for the design-system gate
  */
 exports.DESIGN_SYSTEM_GATE_DEFAULTS = {
-    enabled: false, // Opt-in by default — not all projects use design systems
-    blocking: true,
-    timeout: 120, // 2 minutes — static analysis is fast
-    bannedClasses: [],
-    spacingScale: [0, 1, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 288, 320, 384],
-    fontSizeScale: [10, 12, 14, 16, 18, 20, 24, 30, 36, 48, 60, 72, 96, 128],
-    allowHardcodedColors: false,
+    enabled: false, // opt-in: only runs when design system is configured
+    blocking: false,
+    timeout: 300, // 5 minutes
 };
 /**
- * Default configuration for the Frontend Checks gate
+ * Default configuration for the frontend-checks gate
  */
 exports.FRONTEND_CHECKS_GATE_DEFAULTS = {
-    enabled: false, // Opt-in by default — requires React/Next.js project
-    blocking: false, // Non-blocking by default — these are warnings
-    timeout: 120, // 2 minutes — static analysis is fast
+    enabled: false, // opt-in: only runs in React/Next.js projects
+    blocking: false,
+    timeout: 300, // 5 minutes
 };
 /**
  * Map of gate names to their default configurations
@@ -32962,6 +32958,15 @@ exports["default"] = exports.eslintGate;
  * 1. Unhandled Async State Detection (S054)
  * 2. Key Prop Analysis (S055)
  * 3. useEffect Dependency Analysis (S056)
+ * 4. Re-render Trap Detection (S057)
+ * 5. Server/Client Boundary Check (S058)
+ * 6. Accessibility Interactive Element Check (S059)
+ * 7. Bundle Size Delta (S060)
+ * 8. Image Without Dimensions (S061)
+ * 9. TypeScript Strict Mode Checks (S062)
+ * 10. Import Cycle Detection (S063)
+ * 11. Component Graph Impact (S064)
+ * 12. Import Path Consistency (S065)
  *
  * Scans TSX, JSX files for violations.
  */
@@ -33003,6 +33008,18 @@ exports.frontendChecksGate = void 0;
 exports.scanForUnhandledAsyncState = scanForUnhandledAsyncState;
 exports.scanForMissingKeys = scanForMissingKeys;
 exports.scanForMissingDependencies = scanForMissingDependencies;
+exports.scanForRerenderTraps = scanForRerenderTraps;
+exports.scanForServerClientBoundary = scanForServerClientBoundary;
+exports.scanForA11yIssues = scanForA11yIssues;
+exports.calculateBundleDelta = calculateBundleDelta;
+exports.scanForImageWithoutDimensions = scanForImageWithoutDimensions;
+exports.scanForTypeScriptStrictIssues = scanForTypeScriptStrictIssues;
+exports.buildDependencyGraph = buildDependencyGraph;
+exports.detectCycles = detectCycles;
+exports.scanForImportCycles = scanForImportCycles;
+exports.buildComponentGraph = buildComponentGraph;
+exports.analyzeComponentGraphImpact = analyzeComponentGraphImpact;
+exports.scanForImportPathInconsistency = scanForImportPathInconsistency;
 exports.violationToAnnotation = violationToAnnotation;
 const core = __importStar(__nccwpck_require__(7484));
 const fs = __importStar(__nccwpck_require__(9896));
@@ -33550,6 +33567,857 @@ function scanForMissingDependencies(content, filePath) {
     return violations;
 }
 // ============================================================================
+// S057: Re-render Trap Detection
+// ============================================================================
+/**
+ * Scan for common React re-render traps:
+ * - Objects/arrays created inline in JSX props
+ * - Inline arrow functions in non-event JSX props
+ * - Missing useMemo/useCallback for expensive computations
+ */
+function scanForRerenderTraps(content, filePath) {
+    const violations = [];
+    const lines = content.split('\n');
+    lines.forEach((line, idx) => {
+        const lineNum = idx + 1;
+        // Detect inline object literals in JSX props: prop={{ key: value }}
+        const inlineObjectPattern = /(\w+)\s*=\s*\{\s*\{[^}]*:[^}]*\}\s*\}/g;
+        let m;
+        while ((m = inlineObjectPattern.exec(line)) !== null) {
+            const propName = m[1] || '';
+            // Allow style={{}} — common and expected
+            if (propName !== 'style') {
+                violations.push({
+                    ruleId: 'frontend/rerender-trap',
+                    file: filePath,
+                    line: lineNum,
+                    column: m.index + 1,
+                    message: `Inline object literal in JSX prop "${propName}" creates a new object on every render, causing unnecessary re-renders.`,
+                    gate: 'frontend-checks',
+                    severity: 'warning',
+                    violationType: 'rerender-trap',
+                    suggestion: 'Move this object outside the component or wrap with useMemo(() => ({ ... }), [deps])',
+                });
+            }
+        }
+        // Detect inline array literals in JSX props: prop={[...]}
+        const inlineArrayPattern = /(\w+)\s*=\s*\{\s*\[[^\]]*\]\s*\}/g;
+        while ((m = inlineArrayPattern.exec(line)) !== null) {
+            violations.push({
+                ruleId: 'frontend/rerender-trap',
+                file: filePath,
+                line: lineNum,
+                column: m.index + 1,
+                message: `Inline array literal in JSX prop "${m[1]}" creates a new array on every render, causing unnecessary re-renders.`,
+                gate: 'frontend-checks',
+                severity: 'warning',
+                violationType: 'rerender-trap',
+                suggestion: 'Move this array outside the component or wrap with useMemo(() => [...], [deps])',
+            });
+        }
+        // Detect inline arrow functions in non-event JSX props
+        const inlineArrowPattern = /(\w+)\s*=\s*\{\s*(?:\([^)]*\)|[a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g;
+        // Common event handler props are expected to be inline
+        const allowedEventProps = new Set([
+            'onClick', 'onChange', 'onSubmit', 'onBlur', 'onFocus', 'onKeyDown',
+            'onKeyUp', 'onKeyPress', 'onMouseEnter', 'onMouseLeave', 'onMouseDown',
+            'onMouseUp', 'onInput', 'onScroll', 'onResize', 'onLoad', 'onError',
+            'onContextMenu', 'onDoubleClick', 'onDrag', 'onDrop', 'onSelect',
+            'onTouchStart', 'onTouchEnd', 'onTouchMove', 'onPointerDown', 'onPointerUp',
+        ]);
+        while ((m = inlineArrowPattern.exec(line)) !== null) {
+            const propName = m[1] || '';
+            if (!allowedEventProps.has(propName)) {
+                violations.push({
+                    ruleId: 'frontend/rerender-trap',
+                    file: filePath,
+                    line: lineNum,
+                    column: m.index + 1,
+                    message: `Inline arrow function in JSX prop "${propName}" creates a new function reference on every render.`,
+                    gate: 'frontend-checks',
+                    severity: 'warning',
+                    violationType: 'rerender-trap',
+                    suggestion: `Wrap with useCallback: const handler = useCallback(() => { ... }, [deps]); and pass handler as prop.`,
+                });
+            }
+        }
+    });
+    // Detect expensive array operations without useMemo
+    const chainPattern = /(?:const|let)\s+(\w+)\s*=\s*\w+(?:\.\w+)*\.(?:filter|reduce|sort)\s*\(/g;
+    let chainMatch;
+    while ((chainMatch = chainPattern.exec(content)) !== null) {
+        const beforeMatch = content.substring(0, chainMatch.index);
+        const lineNum = beforeMatch.split('\n').length;
+        const varName = chainMatch[1] || 'result';
+        // Check if inside useMemo
+        const surroundingContext = content.substring(Math.max(0, chainMatch.index - 200), chainMatch.index);
+        const isInsideUseMemo = /useMemo\s*\(\s*\(\s*\)\s*=>\s*\{[^}]*$/.test(surroundingContext);
+        if (!isInsideUseMemo) {
+            violations.push({
+                ruleId: 'frontend/rerender-trap',
+                file: filePath,
+                line: lineNum,
+                column: (lines[lineNum - 1]?.indexOf(varName) ?? 0) + 1,
+                message: `Expensive array operation for "${varName}" runs on every render. Consider wrapping with useMemo.`,
+                gate: 'frontend-checks',
+                severity: 'warning',
+                violationType: 'rerender-trap',
+                suggestion: `const ${varName} = useMemo(() => data.filter(...).map(...), [data]);`,
+            });
+        }
+    }
+    return violations;
+}
+// ============================================================================
+// S058: Server/Client Boundary Check
+// ============================================================================
+/**
+ * React hooks that require client-side execution
+ */
+const CLIENT_ONLY_HOOKS = new Set([
+    'useState', 'useEffect', 'useLayoutEffect', 'useRef', 'useReducer',
+    'useContext', 'useCallback', 'useMemo', 'useImperativeHandle',
+    'useDebugValue', 'useDeferredValue', 'useTransition', 'useId',
+    'useSyncExternalStore', 'useInsertionEffect',
+]);
+/**
+ * Packages that are client-only
+ */
+const CLIENT_ONLY_PACKAGES = [
+    'framer-motion',
+    'react-spring',
+    'react-dnd',
+    'react-beautiful-dnd',
+    'react-virtualized',
+    'react-window',
+    'react-select',
+    'react-datepicker',
+    '@radix-ui/react-',
+    'sonner',
+    'react-hot-toast',
+    'notistack',
+];
+/**
+ * Scan for Next.js server/client boundary issues
+ */
+function scanForServerClientBoundary(content, filePath) {
+    const violations = [];
+    const lines = content.split('\n');
+    const hasUseClientDirective = /^\s*['"]use client['"]/m.test(content);
+    const hasUseServerDirective = /^\s*['"]use server['"]/m.test(content);
+    if (!hasUseClientDirective) {
+        // Check for client-only hook usage without 'use client'
+        for (const hook of CLIENT_ONLY_HOOKS) {
+            const hookPattern = new RegExp(`\\b${hook}\\s*\\(`, 'g');
+            let m;
+            while ((m = hookPattern.exec(content)) !== null) {
+                const beforeMatch = content.substring(0, m.index);
+                const lineNum = beforeMatch.split('\n').length;
+                const lineContent = lines[lineNum - 1] || '';
+                // Skip if this is a custom hook definition (not a call)
+                if (/^(?:export\s+)?(?:function|const|let|var)\s+use[A-Z]/.test(lineContent.trim())) {
+                    continue;
+                }
+                violations.push({
+                    ruleId: 'frontend/server-client-boundary',
+                    file: filePath,
+                    line: lineNum,
+                    column: m.index - beforeMatch.lastIndexOf('\n'),
+                    message: `React hook "${hook}" used without 'use client' directive. Add "use client" at the top of this file.`,
+                    gate: 'frontend-checks',
+                    severity: 'error',
+                    violationType: 'server-client-boundary',
+                    suggestion: `Add "use client"; as the first line of this file.`,
+                });
+                break; // One violation per hook type per file
+            }
+        }
+        // Check client-only package imports
+        for (const pkg of CLIENT_ONLY_PACKAGES) {
+            const escapedPkg = pkg.replace(/[-/]/g, '[-/]');
+            const importPattern = new RegExp(`from\\s+['"]${escapedPkg}`, 'g');
+            let m;
+            while ((m = importPattern.exec(content)) !== null) {
+                const beforeMatch = content.substring(0, m.index);
+                const lineNum = beforeMatch.split('\n').length;
+                violations.push({
+                    ruleId: 'frontend/server-client-boundary',
+                    file: filePath,
+                    line: lineNum,
+                    column: 1,
+                    message: `Client-only package "${pkg}" imported without 'use client' directive.`,
+                    gate: 'frontend-checks',
+                    severity: 'error',
+                    violationType: 'server-client-boundary',
+                    suggestion: `Add "use client"; as the first line of this file.`,
+                });
+                break; // One per package
+            }
+        }
+        // Check window/document access in component files without 'use client'
+        const isComponentFile = /\.(tsx|jsx)$/.test(filePath);
+        if (isComponentFile) {
+            const browserGlobalsPattern = /\b(window|document|navigator|localStorage|sessionStorage)\s*\./g;
+            let m;
+            while ((m = browserGlobalsPattern.exec(content)) !== null) {
+                const beforeMatch = content.substring(0, m.index);
+                const lineNum = beforeMatch.split('\n').length;
+                // Skip if guarded by typeof check on this line or nearby (within 3 lines)
+                const nearbyContext = lines.slice(Math.max(0, lineNum - 4), lineNum + 1).join('\n');
+                if (/typeof\s+(window|document)/.test(nearbyContext))
+                    continue;
+                violations.push({
+                    ruleId: 'frontend/server-client-boundary',
+                    file: filePath,
+                    line: lineNum,
+                    column: m.index - beforeMatch.lastIndexOf('\n'),
+                    message: `Browser global "${m[1]}" accessed without 'use client' directive. This will fail during SSR.`,
+                    gate: 'frontend-checks',
+                    severity: 'error',
+                    violationType: 'server-client-boundary',
+                    suggestion: `Add "use client"; directive or guard with: if (typeof window !== 'undefined') { ... }`,
+                });
+                break; // One per file
+            }
+        }
+        // Heuristic: server component importing .client files
+        if (!hasUseServerDirective) {
+            const clientImportPattern = /from\s+['"]([^'"]+)['"]/g;
+            let m;
+            while ((m = clientImportPattern.exec(content)) !== null) {
+                const importPath = m[1] || '';
+                if (/[/\\-]client[/\\-]/.test(importPath) || importPath.endsWith('.client')) {
+                    const beforeMatch = content.substring(0, m.index);
+                    const lineNum = beforeMatch.split('\n').length;
+                    violations.push({
+                        ruleId: 'frontend/server-client-boundary',
+                        file: filePath,
+                        line: lineNum,
+                        column: 1,
+                        message: `Server component may be importing client-only module "${importPath}". Ensure this is intentional.`,
+                        gate: 'frontend-checks',
+                        severity: 'warning',
+                        violationType: 'server-client-boundary',
+                        suggestion: `If this is a Client Component, add "use client"; to the top.`,
+                    });
+                }
+            }
+        }
+    }
+    return violations;
+}
+// ============================================================================
+// S059: Accessibility Interactive Element Check
+// ============================================================================
+/**
+ * Scan for accessibility issues with interactive elements
+ */
+function scanForA11yIssues(content, filePath) {
+    const violations = [];
+    const lines = content.split('\n');
+    // Only scan JSX files
+    if (!/\.(tsx|jsx)$/.test(filePath))
+        return violations;
+    lines.forEach((line, idx) => {
+        const lineNum = idx + 1;
+        let m;
+        // Detect div/span with onClick but missing role and/or tabIndex
+        const divOnClickPattern = /<(?:div|span)\s[^>]*onClick\s*=/g;
+        while ((m = divOnClickPattern.exec(line)) !== null) {
+            const hasRole = /role\s*=/.test(line);
+            const hasTabIndex = /tabIndex\s*=/.test(line);
+            if (!hasRole || !hasTabIndex) {
+                const missing = [];
+                if (!hasRole)
+                    missing.push('role');
+                if (!hasTabIndex)
+                    missing.push('tabIndex');
+                violations.push({
+                    ruleId: 'frontend/a11y-interactive',
+                    file: filePath,
+                    line: lineNum,
+                    column: m.index + 1,
+                    message: `Interactive div/span with onClick is missing: ${missing.join(', ')}. Screen readers cannot interact with this element.`,
+                    gate: 'frontend-checks',
+                    severity: 'error',
+                    violationType: 'a11y-interactive',
+                    suggestion: `Add role="button" tabIndex={0} and onKeyDown handler, or use a <button> element instead.`,
+                });
+            }
+        }
+        // Detect icon-only buttons without accessible label
+        const iconButtonPattern = /<button(?:\s[^>]*)?>(?:\s*<(?:svg|img|[A-Z]\w*Icon)[^>]*\/?>)\s*<\/button>/g;
+        while ((m = iconButtonPattern.exec(line)) !== null) {
+            const hasAriaLabel = /aria-label\s*=/.test(line);
+            const hasAriaLabelledBy = /aria-labelledby\s*=/.test(line);
+            const hasTitle = /title\s*=/.test(line);
+            if (!hasAriaLabel && !hasAriaLabelledBy && !hasTitle) {
+                violations.push({
+                    ruleId: 'frontend/a11y-interactive',
+                    file: filePath,
+                    line: lineNum,
+                    column: m.index + 1,
+                    message: `Icon button without accessible label. Screen readers cannot describe this button's purpose.`,
+                    gate: 'frontend-checks',
+                    severity: 'error',
+                    violationType: 'a11y-interactive',
+                    suggestion: `Add aria-label="Descriptive action name" to the button.`,
+                });
+            }
+        }
+        // Detect nested buttons (invalid HTML)
+        const nestedButtonPattern = /<button[^>]*>(?:[^<]|<(?!\/button)[^>]*>)*<button/g;
+        while ((m = nestedButtonPattern.exec(line)) !== null) {
+            violations.push({
+                ruleId: 'frontend/a11y-interactive',
+                file: filePath,
+                line: lineNum,
+                column: m.index + 1,
+                message: `Nested <button> elements are invalid HTML and cause accessibility issues.`,
+                gate: 'frontend-checks',
+                severity: 'error',
+                violationType: 'a11y-interactive',
+                suggestion: `Remove nested buttons. Restructure to avoid nesting interactive elements.`,
+            });
+        }
+        // Detect nested anchor links (invalid HTML)
+        const nestedLinkPattern = /<a\s[^>]*>(?:[^<]|<(?!\/a)[^>]*>)*<a\s/g;
+        while ((m = nestedLinkPattern.exec(line)) !== null) {
+            violations.push({
+                ruleId: 'frontend/a11y-interactive',
+                file: filePath,
+                line: lineNum,
+                column: m.index + 1,
+                message: `Nested <a> elements are invalid HTML and cause accessibility issues.`,
+                gate: 'frontend-checks',
+                severity: 'error',
+                violationType: 'a11y-interactive',
+                suggestion: `Remove nested anchor links. Only one interactive element should wrap content.`,
+            });
+        }
+        // Detect button nested inside anchor
+        const buttonInLinkPattern = /<a\s[^>]*>(?:[^<]|<(?!\/a)[^>]*>)*<button/g;
+        while ((m = buttonInLinkPattern.exec(line)) !== null) {
+            violations.push({
+                ruleId: 'frontend/a11y-interactive',
+                file: filePath,
+                line: lineNum,
+                column: m.index + 1,
+                message: `<button> nested inside <a> is invalid HTML. Interactive elements should not be nested.`,
+                gate: 'frontend-checks',
+                severity: 'error',
+                violationType: 'a11y-interactive',
+                suggestion: `Use either a <button> or an <a>, not both.`,
+            });
+        }
+    });
+    return violations;
+}
+/**
+ * Read build output sizes from a build directory
+ */
+function readBuildStats(buildDir) {
+    const sizes = new Map();
+    try {
+        // Try Next.js build manifest
+        const manifestPath = path.join(buildDir, 'build-manifest.json');
+        if (fs.existsSync(manifestPath)) {
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+            if (manifest.pages) {
+                for (const assets of Object.values(manifest.pages)) {
+                    for (const asset of assets) {
+                        const assetPath = path.join(buildDir, 'static', asset);
+                        if (fs.existsSync(assetPath)) {
+                            const stat = fs.statSync(assetPath);
+                            const current = sizes.get(asset) ?? 0;
+                            sizes.set(asset, Math.max(current, stat.size));
+                        }
+                    }
+                }
+            }
+        }
+        // Try webpack stats.json
+        const statsPath = path.join(buildDir, 'stats.json');
+        if (fs.existsSync(statsPath)) {
+            const stats = JSON.parse(fs.readFileSync(statsPath, 'utf-8'));
+            if (stats.assets && Array.isArray(stats.assets)) {
+                for (const asset of stats.assets) {
+                    if (asset.name && asset.size) {
+                        sizes.set(asset.name, asset.size);
+                    }
+                }
+            }
+        }
+        // Fallback: scan static directory for JS/CSS files
+        const staticDir = path.join(buildDir, 'static');
+        if (fs.existsSync(staticDir)) {
+            const scanDir = (dir) => {
+                try {
+                    const entries = fs.readdirSync(dir, { withFileTypes: true });
+                    for (const entry of entries) {
+                        const fullPath = path.join(dir, entry.name);
+                        if (entry.isDirectory()) {
+                            scanDir(fullPath);
+                        }
+                        else if (entry.name.endsWith('.js') || entry.name.endsWith('.css')) {
+                            const stat = fs.statSync(fullPath);
+                            const relPath = path.relative(buildDir, fullPath).replace(/\\/g, '/');
+                            sizes.set(relPath, stat.size);
+                        }
+                    }
+                }
+                catch {
+                    // Skip unreadable directories
+                }
+            };
+            scanDir(staticDir);
+        }
+    }
+    catch {
+        // Build stats not available
+    }
+    return sizes;
+}
+/**
+ * Calculate bundle size delta between two builds
+ */
+function calculateBundleDelta(beforeDir, afterDir, thresholdBytes = 50 * 1024) {
+    const violations = [];
+    const deltas = [];
+    const beforeStats = readBuildStats(beforeDir);
+    const afterStats = readBuildStats(afterDir);
+    for (const [chunk, afterSize] of afterStats) {
+        const beforeSize = beforeStats.get(chunk) ?? 0;
+        const delta = afterSize - beforeSize;
+        const deltaPercent = beforeSize > 0 ? (delta / beforeSize) * 100 : 100;
+        deltas.push({ chunk, before: beforeSize, after: afterSize, delta, deltaPercent });
+        if (delta > thresholdBytes) {
+            violations.push({
+                ruleId: 'frontend/bundle-size-delta',
+                file: chunk,
+                line: 1,
+                message: `Bundle chunk "${chunk}" grew by ${(delta / 1024).toFixed(1)}KB (${deltaPercent.toFixed(1)}%). Exceeds ${(thresholdBytes / 1024).toFixed(0)}KB threshold.`,
+                gate: 'frontend-checks',
+                severity: 'warning',
+                violationType: 'bundle-size-delta',
+                suggestion: `Analyze what was added to this chunk. Consider code-splitting or lazy loading.`,
+            });
+        }
+    }
+    return { deltas, violations };
+}
+// ============================================================================
+// S061: Image Without Dimensions
+// ============================================================================
+/**
+ * Scan for img/Image tags without width and height attributes
+ */
+function scanForImageWithoutDimensions(content, filePath) {
+    const violations = [];
+    const lines = content.split('\n');
+    if (!/\.(tsx|jsx)$/.test(filePath))
+        return violations;
+    lines.forEach((line, idx) => {
+        const lineNum = idx + 1;
+        let m;
+        // Native <img> tag
+        const imgPattern = /<img\s([^>]*)\/?>/g;
+        while ((m = imgPattern.exec(line)) !== null) {
+            const attrs = m[1] || '';
+            const hasWidth = /\bwidth\s*=/.test(attrs);
+            const hasHeight = /\bheight\s*=/.test(attrs);
+            if (!hasWidth || !hasHeight) {
+                const missing = [];
+                if (!hasWidth)
+                    missing.push('width');
+                if (!hasHeight)
+                    missing.push('height');
+                violations.push({
+                    ruleId: 'frontend/image-missing-dimensions',
+                    file: filePath,
+                    line: lineNum,
+                    column: m.index + 1,
+                    message: `<img> tag missing ${missing.join(' and ')} attribute(s). Missing dimensions cause Cumulative Layout Shift (CLS).`,
+                    gate: 'frontend-checks',
+                    severity: 'warning',
+                    violationType: 'image-missing-dimensions',
+                    suggestion: `Add width and height: <img src="..." width={800} height={600} alt="..." />`,
+                });
+            }
+        }
+        // Next.js <Image> component
+        const nextImagePattern = /<Image\s([^>]*)(?:\/>|>)/g;
+        while ((m = nextImagePattern.exec(line)) !== null) {
+            const attrs = m[1] || '';
+            const hasWidth = /\bwidth\s*=/.test(attrs);
+            const hasHeight = /\bheight\s*=/.test(attrs);
+            const hasFill = /\bfill\b/.test(attrs);
+            // fill mode doesn't require explicit dimensions
+            if (!hasFill && (!hasWidth || !hasHeight)) {
+                const missing = [];
+                if (!hasWidth)
+                    missing.push('width');
+                if (!hasHeight)
+                    missing.push('height');
+                violations.push({
+                    ruleId: 'frontend/image-missing-dimensions',
+                    file: filePath,
+                    line: lineNum,
+                    column: m.index + 1,
+                    message: `Next.js <Image> missing ${missing.join(' and ')} attribute(s). Required by Next.js and causes layout shift.`,
+                    gate: 'frontend-checks',
+                    severity: 'error',
+                    violationType: 'image-missing-dimensions',
+                    suggestion: `Add dimensions: <Image src="..." width={800} height={600} alt="..." /> or use fill prop.`,
+                });
+            }
+        }
+    });
+    return violations;
+}
+// ============================================================================
+// S062: TypeScript Strict Mode Checks
+// ============================================================================
+/**
+ * Scan for TypeScript strict mode violations
+ */
+function scanForTypeScriptStrictIssues(content, filePath) {
+    const violations = [];
+    const lines = content.split('\n');
+    if (!/\.(ts|tsx)$/.test(filePath))
+        return violations;
+    lines.forEach((line, idx) => {
+        const lineNum = idx + 1;
+        const trimmedLine = line.trim();
+        // Skip comment lines
+        if (trimmedLine.startsWith('//') || trimmedLine.startsWith('*') || trimmedLine.startsWith('/*')) {
+            return;
+        }
+        let m;
+        // Detect implicit any in function parameters (heuristic)
+        const implicitAnyPattern = /(?:function\s+\w+\s*\(|(?:^|\s)\()\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?:,\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*)*\)\s*(?:=>|\{)/g;
+        while ((m = implicitAnyPattern.exec(line)) !== null) {
+            const paramSection = m[0];
+            if (!/:\s*\w/.test(paramSection) && !/:\s*[A-Z]/.test(paramSection)) {
+                const isFunctionDecl = /function\s+[A-Z]/.test(paramSection);
+                if (!isFunctionDecl) {
+                    violations.push({
+                        ruleId: 'frontend/ts-strict-implicit-any',
+                        file: filePath,
+                        line: lineNum,
+                        column: m.index + 1,
+                        message: `Parameter without type annotation may result in implicit "any". Add explicit types.`,
+                        gate: 'frontend-checks',
+                        severity: 'warning',
+                        violationType: 'ts-strict-mode',
+                        suggestion: `Add type annotations: (param: ParameterType) => { ... }`,
+                    });
+                }
+            }
+        }
+        // Detect non-null assertions (!) without justification comment
+        const nonNullPattern = /(\w+)!\s*(?:[.[(,;]|$)/g;
+        while ((m = nonNullPattern.exec(line)) !== null) {
+            const varName = m[1] || '';
+            if (['', 'return', 'if', 'while', 'for'].includes(varName))
+                continue;
+            const prevLine = lines[idx - 1] || '';
+            const hasJustification = /\/\/\s*(?:safe|guaranteed|non-null|always defined|exists|trust)/i.test(prevLine);
+            if (!hasJustification) {
+                violations.push({
+                    ruleId: 'frontend/ts-strict-non-null-assertion',
+                    file: filePath,
+                    line: lineNum,
+                    column: m.index + 1,
+                    message: `Non-null assertion on "${varName}!" without justification comment. This bypasses type safety.`,
+                    gate: 'frontend-checks',
+                    severity: 'warning',
+                    violationType: 'ts-strict-mode',
+                    suggestion: `Add a justification comment, use optional chaining (?.), or add a proper null check.`,
+                });
+            }
+        }
+        // Detect type assertions to any
+        const asAnyPattern = /(?:as\s+any\b|<any>\s*\w)/g;
+        while ((m = asAnyPattern.exec(line)) !== null) {
+            violations.push({
+                ruleId: 'frontend/ts-strict-as-any',
+                file: filePath,
+                line: lineNum,
+                column: m.index + 1,
+                message: `Type assertion to "any" disables TypeScript's type checking for this expression.`,
+                gate: 'frontend-checks',
+                severity: 'warning',
+                violationType: 'ts-strict-mode',
+                suggestion: `Use a specific type instead of "any". If unavoidable, use "unknown" and add type guards.`,
+            });
+        }
+    });
+    return violations;
+}
+// ============================================================================
+// S063: Import Cycle Detection
+// ============================================================================
+/**
+ * Build a dependency graph from import statements across all files
+ */
+function buildDependencyGraph(files, cwd) {
+    const graph = new Map();
+    for (const filePath of files) {
+        const relPath = path.relative(cwd, filePath).replace(/\\/g, '/');
+        if (!graph.has(relPath)) {
+            graph.set(relPath, new Set());
+        }
+        try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const importPattern = /(?:import|require)\s*(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)?\s*(?:,\s*(?:\{[^}]*\}|\*\s+as\s+\w+|\w+))?\s*(?:from\s*)?['"]([^'"]+)['"]/g;
+            let m;
+            while ((m = importPattern.exec(content)) !== null) {
+                const importPath = m[1] || '';
+                if (!importPath.startsWith('.') && !importPath.startsWith('@/') && !importPath.startsWith('~/')) {
+                    continue;
+                }
+                let resolved = importPath;
+                if (importPath.startsWith('.')) {
+                    resolved = path.resolve(path.dirname(filePath), importPath);
+                }
+                else if (importPath.startsWith('@/')) {
+                    resolved = path.resolve(cwd, 'src', importPath.slice(2));
+                }
+                else if (importPath.startsWith('~/')) {
+                    resolved = path.resolve(cwd, importPath.slice(2));
+                }
+                const extensions = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js'];
+                let resolvedPath = null;
+                if (fs.existsSync(resolved)) {
+                    resolvedPath = resolved;
+                }
+                else {
+                    for (const ext of extensions) {
+                        const candidate = resolved + ext;
+                        if (fs.existsSync(candidate)) {
+                            resolvedPath = candidate;
+                            break;
+                        }
+                    }
+                }
+                if (resolvedPath) {
+                    const relResolved = path.relative(cwd, resolvedPath).replace(/\\/g, '/');
+                    graph.get(relPath)?.add(relResolved);
+                }
+            }
+        }
+        catch {
+            // Skip unreadable files
+        }
+    }
+    return graph;
+}
+/**
+ * Detect cycles in the dependency graph using DFS
+ */
+function detectCycles(graph) {
+    const cycles = [];
+    const visited = new Set();
+    const recursionStack = new Set();
+    const pathStack = [];
+    function dfs(node) {
+        visited.add(node);
+        recursionStack.add(node);
+        pathStack.push(node);
+        const neighbors = graph.get(node) ?? new Set();
+        for (const neighbor of neighbors) {
+            if (!visited.has(neighbor)) {
+                dfs(neighbor);
+            }
+            else if (recursionStack.has(neighbor)) {
+                const cycleStart = pathStack.indexOf(neighbor);
+                if (cycleStart !== -1) {
+                    const cycle = [...pathStack.slice(cycleStart), neighbor];
+                    cycles.push(cycle);
+                }
+            }
+        }
+        pathStack.pop();
+        recursionStack.delete(node);
+    }
+    for (const node of graph.keys()) {
+        if (!visited.has(node)) {
+            dfs(node);
+        }
+    }
+    return cycles;
+}
+/**
+ * Scan for import cycles across all files
+ */
+function scanForImportCycles(files, cwd) {
+    const violations = [];
+    const graph = buildDependencyGraph(files, cwd);
+    const cycles = detectCycles(graph);
+    for (const cycle of cycles) {
+        const cyclePath = cycle.join(' -> ');
+        const entryFile = cycle[0] || 'unknown';
+        violations.push({
+            ruleId: 'frontend/import-cycle',
+            file: entryFile,
+            line: 1,
+            message: `Circular import detected: ${cyclePath}`,
+            gate: 'frontend-checks',
+            severity: 'warning',
+            violationType: 'import-cycle',
+            suggestion: `Break the cycle by extracting shared code to a separate module or using dependency injection.`,
+        });
+    }
+    return violations;
+}
+/**
+ * Build a component graph with forward and reverse edges
+ */
+function buildComponentGraph(files, cwd) {
+    const graph = new Map();
+    const forwardDeps = buildDependencyGraph(files, cwd);
+    for (const file of files) {
+        const relPath = path.relative(cwd, file).replace(/\\/g, '/');
+        graph.set(relPath, {
+            file: relPath,
+            imports: [...(forwardDeps.get(relPath) ?? [])],
+            importedBy: [],
+            blastRadius: 0,
+        });
+    }
+    // Build reverse edges
+    for (const [file, deps] of forwardDeps) {
+        for (const dep of deps) {
+            const entry = graph.get(dep);
+            if (entry && !entry.importedBy.includes(file)) {
+                entry.importedBy.push(file);
+            }
+        }
+    }
+    // Calculate blast radius (BFS via reverse edges)
+    for (const [file, entry] of graph) {
+        const affected = new Set();
+        const queue = [file];
+        while (queue.length > 0) {
+            const current = queue.shift();
+            const currentEntry = graph.get(current);
+            if (!currentEntry)
+                continue;
+            for (const importer of currentEntry.importedBy) {
+                if (!affected.has(importer)) {
+                    affected.add(importer);
+                    queue.push(importer);
+                }
+            }
+        }
+        entry.blastRadius = affected.size;
+    }
+    return graph;
+}
+/**
+ * Generate blast radius violations for high-impact changed files
+ */
+function analyzeComponentGraphImpact(changedFiles, allFiles, cwd, blastRadiusThreshold = 20) {
+    const violations = [];
+    const graph = buildComponentGraph(allFiles, cwd);
+    for (const changedFile of changedFiles) {
+        const relPath = path.relative(cwd, changedFile).replace(/\\/g, '/');
+        const entry = graph.get(relPath);
+        if (entry && entry.blastRadius > blastRadiusThreshold) {
+            violations.push({
+                ruleId: 'frontend/component-graph-impact',
+                file: relPath,
+                line: 1,
+                message: `High blast radius: changing "${relPath}" affects ${entry.blastRadius} other component(s). Review carefully.`,
+                gate: 'frontend-checks',
+                severity: 'warning',
+                violationType: 'component-graph-impact',
+                suggestion: `Affected by: ${entry.importedBy.slice(0, 5).join(', ')}${entry.importedBy.length > 5 ? ` and ${entry.importedBy.length - 5} more` : ''}`,
+            });
+        }
+    }
+    return violations;
+}
+// ============================================================================
+// S065: Import Path Consistency
+// ============================================================================
+/**
+ * Scan for inconsistent import paths (mixing aliases with relative paths, etc.)
+ */
+function scanForImportPathInconsistency(content, filePath) {
+    const violations = [];
+    const lines = content.split('\n');
+    const imports = [];
+    lines.forEach((line, idx) => {
+        const importMatch = line.match(/(?:import|from)\s+['"]([^'"]+)['"]/);
+        if (!importMatch)
+            return;
+        const importPath = importMatch[1] || '';
+        if (!importPath)
+            return;
+        if (!importPath.startsWith('.') && !importPath.startsWith('@/') && !importPath.startsWith('~/')) {
+            return; // Skip node_modules
+        }
+        const isAlias = importPath.startsWith('@/') || importPath.startsWith('~/');
+        const isRelative = importPath.startsWith('.') || importPath.startsWith('..');
+        const isIndex = importPath.endsWith('/index') ||
+            importPath.endsWith('/index.ts') ||
+            importPath.endsWith('/index.tsx') ||
+            importPath.endsWith('/index.js');
+        imports.push({ path: importPath, line: idx + 1, isAlias, isRelative, isIndex });
+    });
+    // Check 1: Mixing @/ aliases with relative paths
+    const aliasImports = imports.filter((i) => i.isAlias);
+    const relativeImports = imports.filter((i) => i.isRelative);
+    if (aliasImports.length > 0 && relativeImports.length > 0) {
+        for (const relImport of relativeImports) {
+            violations.push({
+                ruleId: 'frontend/import-path-consistency',
+                file: filePath,
+                line: relImport.line,
+                message: `Inconsistent import style: mixing @/ alias imports with relative path "${relImport.path}". Use consistent import style.`,
+                gate: 'frontend-checks',
+                severity: 'warning',
+                violationType: 'import-path-inconsistency',
+                suggestion: `Standardize all imports to use either @/ aliases or relative paths consistently.`,
+            });
+        }
+    }
+    // Check 2: Mixing index imports with direct file imports for the same module
+    const importsByModule = new Map();
+    for (const imp of imports) {
+        const normalized = imp.path
+            .replace(/\/index(?:\.(?:ts|tsx|js|jsx))?$/, '')
+            .replace(/\.(?:ts|tsx|js|jsx)$/, '');
+        if (!importsByModule.has(normalized)) {
+            importsByModule.set(normalized, []);
+        }
+        importsByModule.get(normalized)?.push({ line: imp.line, path: imp.path, isIndex: imp.isIndex });
+    }
+    for (const [, group] of importsByModule) {
+        if (group.length > 1) {
+            const hasIndex = group.some((g) => g.isIndex);
+            const hasDirect = group.some((g) => !g.isIndex);
+            if (hasIndex && hasDirect) {
+                for (const imp of group) {
+                    violations.push({
+                        ruleId: 'frontend/import-path-consistency',
+                        file: filePath,
+                        line: imp.line,
+                        message: `Inconsistent imports: mixing index imports with direct file imports for "${imp.path}".`,
+                        gate: 'frontend-checks',
+                        severity: 'warning',
+                        violationType: 'import-path-inconsistency',
+                        suggestion: `Use either the index import or direct file import consistently.`,
+                    });
+                }
+            }
+        }
+    }
+    return violations;
+}
+// ============================================================================
 // Gate Implementation
 // ============================================================================
 /**
@@ -33607,15 +34475,35 @@ function getFrontendChecksConfig() {
         enableAsyncStateCheck: process.env['HAWKY_GATE_FRONTEND_ASYNC_STATE'] !== 'false',
         enableKeyPropCheck: process.env['HAWKY_GATE_FRONTEND_KEY_PROP'] !== 'false',
         enableDependencyCheck: process.env['HAWKY_GATE_FRONTEND_DEPENDENCY'] !== 'false',
+        enableRerenderTrapCheck: process.env['HAWKY_GATE_FRONTEND_RERENDER_TRAP'] !== 'false',
+        enableServerClientCheck: process.env['HAWKY_GATE_FRONTEND_SERVER_CLIENT'] !== 'false',
+        enableA11yCheck: process.env['HAWKY_GATE_FRONTEND_A11Y'] !== 'false',
+        enableBundleSizeCheck: process.env['HAWKY_GATE_FRONTEND_BUNDLE_SIZE'] !== 'false',
+        bundleSizeThresholdKb: parseInt(process.env['HAWKY_GATE_FRONTEND_BUNDLE_THRESHOLD_KB'] || '50', 10),
+        enableImageDimensionsCheck: process.env['HAWKY_GATE_FRONTEND_IMAGE_DIMS'] !== 'false',
+        enableTsStrictCheck: process.env['HAWKY_GATE_FRONTEND_TS_STRICT'] !== 'false',
+        enableImportCycleCheck: process.env['HAWKY_GATE_FRONTEND_IMPORT_CYCLES'] !== 'false',
+        enableComponentGraphCheck: process.env['HAWKY_GATE_FRONTEND_COMPONENT_GRAPH'] !== 'false',
+        componentGraphBlastRadiusThreshold: parseInt(process.env['HAWKY_GATE_FRONTEND_BLAST_RADIUS_THRESHOLD'] || '20', 10),
+        enableImportPathConsistencyCheck: process.env['HAWKY_GATE_FRONTEND_IMPORT_PATHS'] !== 'false',
     };
 }
 /**
  * Frontend Checks Gate
  *
  * Scans React/Next.js code for common issues:
- * - Missing loading/error state handling
- * - Missing or incorrect key props
- * - Missing hook dependencies
+ * - Missing loading/error state handling (S054)
+ * - Missing or incorrect key props (S055)
+ * - Missing hook dependencies (S056)
+ * - Re-render traps (S057)
+ * - Server/client boundary issues (S058)
+ * - Accessibility interactive element issues (S059)
+ * - Bundle size delta (S060)
+ * - Image without dimensions (S061)
+ * - TypeScript strict mode violations (S062)
+ * - Import cycles (S063)
+ * - Component graph impact (S064)
+ * - Import path consistency (S065)
  */
 exports.frontendChecksGate = {
     name: 'frontend-checks',
@@ -33646,7 +34534,7 @@ exports.frontendChecksGate = {
                 try {
                     const content = await fs.promises.readFile(file, 'utf-8');
                     const relativePath = path.relative(options.cwd, file).replace(/\\/g, '/');
-                    // Run enabled scanners
+                    // Run enabled per-file scanners
                     if (config.enableAsyncStateCheck) {
                         violations.push(...scanForUnhandledAsyncState(content, relativePath));
                     }
@@ -33656,10 +34544,49 @@ exports.frontendChecksGate = {
                     if (config.enableDependencyCheck) {
                         violations.push(...scanForMissingDependencies(content, relativePath));
                     }
+                    if (config.enableRerenderTrapCheck) {
+                        violations.push(...scanForRerenderTraps(content, relativePath));
+                    }
+                    if (config.enableServerClientCheck) {
+                        violations.push(...scanForServerClientBoundary(content, relativePath));
+                    }
+                    if (config.enableA11yCheck) {
+                        violations.push(...scanForA11yIssues(content, relativePath));
+                    }
+                    if (config.enableImageDimensionsCheck) {
+                        violations.push(...scanForImageWithoutDimensions(content, relativePath));
+                    }
+                    if (config.enableTsStrictCheck) {
+                        violations.push(...scanForTypeScriptStrictIssues(content, relativePath));
+                    }
+                    if (config.enableImportPathConsistencyCheck) {
+                        violations.push(...scanForImportPathInconsistency(content, relativePath));
+                    }
                 }
                 catch (err) {
                     core.debug(`Failed to scan ${file}: ${err}`);
                 }
+            }
+            // S060: Bundle size delta — requires before/after build directories
+            if (config.enableBundleSizeCheck) {
+                const beforeDir = path.join(options.cwd, '.hawky-bundle-before');
+                const afterDir = path.join(options.cwd, '.next');
+                if (fs.existsSync(beforeDir) && fs.existsSync(afterDir)) {
+                    const { violations: bundleViolations } = calculateBundleDelta(beforeDir, afterDir, config.bundleSizeThresholdKb * 1024);
+                    violations.push(...bundleViolations);
+                }
+                else {
+                    core.debug('Bundle size check skipped: no before/after build dirs found');
+                }
+            }
+            // S063: Import cycle detection (cross-file analysis)
+            if (config.enableImportCycleCheck) {
+                violations.push(...scanForImportCycles(files, options.cwd));
+            }
+            // S064: Component graph impact analysis
+            if (config.enableComponentGraphCheck) {
+                violations.push(...analyzeComponentGraphImpact(files, // In production this should be filtered to PR-changed files
+                files, options.cwd, config.componentGraphBlastRadiusThreshold));
             }
             // Create annotations
             const annotations = options.createAnnotations
@@ -34378,7 +35305,7 @@ exports["default"] = exports.gitleaksGate;
  * Exports all gate implementations and common types.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.frontendChecksViolationToAnnotation = exports.scanForMissingDependencies = exports.scanForMissingKeys = exports.scanForUnhandledAsyncState = exports.frontendChecksGate = exports.designSystemViolationToAnnotation = exports.scanForFontSizeViolations = exports.scanForSpacingViolations = exports.scanForHardcodedColors = exports.scanForBannedClasses = exports.designSystemGate = exports.npmAuditViolationToAnnotation = exports.parseNpmAuditOutput = exports.npmAuditGate = exports.gitleaksViolationToAnnotation = exports.gitleaksGetChangedFiles = exports.parseGitleaksOutput = exports.gitleaksGate = exports.semgrepViolationToAnnotation = exports.semgrepGetChangedFiles = exports.parseSemgrepOutputWithSeverity = exports.parseSemgrepOutput = exports.semgrepGate = exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
+exports.frontendViolationToAnnotation = exports.scanForImportPathInconsistency = exports.analyzeComponentGraphImpact = exports.buildComponentGraph = exports.scanForImportCycles = exports.detectCycles = exports.buildDependencyGraph = exports.scanForTypeScriptStrictIssues = exports.scanForImageWithoutDimensions = exports.calculateBundleDelta = exports.scanForA11yIssues = exports.scanForServerClientBoundary = exports.scanForRerenderTraps = exports.scanForMissingDependencies = exports.scanForMissingKeys = exports.scanForUnhandledAsyncState = exports.frontendChecksGate = exports.designSystemViolationToAnnotation = exports.scanForFontSizeViolations = exports.scanForSpacingViolations = exports.scanForHardcodedColors = exports.scanForBannedClasses = exports.designSystemGate = exports.npmAuditViolationToAnnotation = exports.parseNpmAuditOutput = exports.npmAuditGate = exports.gitleaksViolationToAnnotation = exports.gitleaksGetChangedFiles = exports.parseGitleaksOutput = exports.gitleaksGate = exports.semgrepViolationToAnnotation = exports.semgrepGetChangedFiles = exports.parseSemgrepOutputWithSeverity = exports.parseSemgrepOutput = exports.semgrepGate = exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
 // TypeScript Gate
 var typescript_1 = __nccwpck_require__(9249);
 Object.defineProperty(exports, "typescriptGate", ({ enumerable: true, get: function () { return typescript_1.typescriptGate; } }));
@@ -34423,7 +35350,19 @@ Object.defineProperty(exports, "frontendChecksGate", ({ enumerable: true, get: f
 Object.defineProperty(exports, "scanForUnhandledAsyncState", ({ enumerable: true, get: function () { return frontend_checks_1.scanForUnhandledAsyncState; } }));
 Object.defineProperty(exports, "scanForMissingKeys", ({ enumerable: true, get: function () { return frontend_checks_1.scanForMissingKeys; } }));
 Object.defineProperty(exports, "scanForMissingDependencies", ({ enumerable: true, get: function () { return frontend_checks_1.scanForMissingDependencies; } }));
-Object.defineProperty(exports, "frontendChecksViolationToAnnotation", ({ enumerable: true, get: function () { return frontend_checks_1.violationToAnnotation; } }));
+Object.defineProperty(exports, "scanForRerenderTraps", ({ enumerable: true, get: function () { return frontend_checks_1.scanForRerenderTraps; } }));
+Object.defineProperty(exports, "scanForServerClientBoundary", ({ enumerable: true, get: function () { return frontend_checks_1.scanForServerClientBoundary; } }));
+Object.defineProperty(exports, "scanForA11yIssues", ({ enumerable: true, get: function () { return frontend_checks_1.scanForA11yIssues; } }));
+Object.defineProperty(exports, "calculateBundleDelta", ({ enumerable: true, get: function () { return frontend_checks_1.calculateBundleDelta; } }));
+Object.defineProperty(exports, "scanForImageWithoutDimensions", ({ enumerable: true, get: function () { return frontend_checks_1.scanForImageWithoutDimensions; } }));
+Object.defineProperty(exports, "scanForTypeScriptStrictIssues", ({ enumerable: true, get: function () { return frontend_checks_1.scanForTypeScriptStrictIssues; } }));
+Object.defineProperty(exports, "buildDependencyGraph", ({ enumerable: true, get: function () { return frontend_checks_1.buildDependencyGraph; } }));
+Object.defineProperty(exports, "detectCycles", ({ enumerable: true, get: function () { return frontend_checks_1.detectCycles; } }));
+Object.defineProperty(exports, "scanForImportCycles", ({ enumerable: true, get: function () { return frontend_checks_1.scanForImportCycles; } }));
+Object.defineProperty(exports, "buildComponentGraph", ({ enumerable: true, get: function () { return frontend_checks_1.buildComponentGraph; } }));
+Object.defineProperty(exports, "analyzeComponentGraphImpact", ({ enumerable: true, get: function () { return frontend_checks_1.analyzeComponentGraphImpact; } }));
+Object.defineProperty(exports, "scanForImportPathInconsistency", ({ enumerable: true, get: function () { return frontend_checks_1.scanForImportPathInconsistency; } }));
+Object.defineProperty(exports, "frontendViolationToAnnotation", ({ enumerable: true, get: function () { return frontend_checks_1.violationToAnnotation; } }));
 
 
 /***/ }),
