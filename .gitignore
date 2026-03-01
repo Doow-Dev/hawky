@@ -36,3 +36,4 @@ npm-debug.log*
 # Temp
 tmp/
 temp/
+.claude/worktrees/
