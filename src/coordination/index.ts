@@ -114,3 +114,17 @@ export {
   detectOwnershipCollisions,
   formatOwnershipCollisionWarning,
 } from './ownership-collision';
+
+export {
+  // Types
+  type HandoffNotification,
+  type HandoffResult,
+  type HandoffOptions,
+  // Constants
+  API_CHANGE_PATTERNS,
+  SCHEMA_CHANGE_PATTERNS,
+  AUTH_CHANGE_PATTERNS,
+  // Functions
+  anyFileMatches,
+  generateHandoffNotifications,
+} from './session-handoff';
