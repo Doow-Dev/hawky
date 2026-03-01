@@ -25,3 +25,28 @@ export {
   getEndpointsByTag,
   getErrorResponses,
 } from './spec-parser';
+
+export {
+  // Types
+  type ImplementedError,
+  type ErrorCoverageResult,
+  // Functions
+  findImplementedErrors,
+  getUniqueImplementedCodes,
+  checkErrorCoverage,
+  groupErrorsByCode,
+  formatCoverageReport,
+} from './error-coverage';
+
+export {
+  // Types
+  type FileModTime,
+  type FreshnessResult,
+  // Functions
+  getFileModTime,
+  findSourceFiles,
+  findApiSourceDirs,
+  checkSpecFreshness,
+  formatFreshnessReport,
+  getFreshnessStatus,
+} from './spec-freshness';
