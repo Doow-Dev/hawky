@@ -1,0 +1,192 @@
+rules:
+  # Direct use of req.params for resource access without ownership check
+  - id: hawky.security.idor-params-no-ownership
+    message: |
+      Using req.params directly for database lookup without ownership validation.
+      Attackers can access other users' data by changing the ID in the URL.
+      Add ownership check: WHERE id = $1 AND user_id = req.user.id
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          # findById/findOne patterns
+          - pattern: |
+              $MODEL.findById(req.params.$ID)
+          - pattern: |
+              $MODEL.findByPk(req.params.$ID)
+          - pattern: |
+              $MODEL.findOne({ where: { id: req.params.$ID } })
+          - pattern: |
+              $MODEL.findUnique({ where: { id: req.params.$ID } })
+          # Direct property access
+          - pattern: |
+              $MODEL.findOne({ $FIELD: req.params.$ID })
+          - pattern: |
+              $MODEL.findUnique({ where: { $FIELD: req.params.$ID } })
+      - pattern-not: |
+          $MODEL.$METHOD({ where: { ..., userId: ..., ... } })
+      - pattern-not: |
+          $MODEL.$METHOD({ where: { ..., user_id: ..., ... } })
+      - pattern-not: |
+          $MODEL.$METHOD({ where: { ..., ownerId: ..., ... } })
+    paths:
+      include:
+        - "**/routes/**"
+        - "**/controllers/**"
+        - "**/handlers/**"
+        - "**/api/**"
+        - "**/*route*"
+        - "**/*controller*"
+        - "**/*handler*"
+
+  # Database query with user-supplied ID without filtering by authenticated user
+  - id: hawky.security.idor-query-no-user-filter
+    message: |
+      Database query uses user-supplied ID without filtering by authenticated user.
+      Add a user ownership filter: .where({ id: req.params.id, userId: req.user.id })
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          # Knex/query builder patterns
+          - pattern: |
+              $QUERY.where('id', req.params.$ID)
+          - pattern: |
+              $QUERY.where({ id: req.params.$ID })
+          - pattern: |
+              $QUERY.whereIn('id', req.params.$IDS)
+          # Drizzle patterns
+          - pattern: |
+              $DB.select().$FROM($TABLE).where(eq($TABLE.id, req.params.$ID))
+      - pattern-not: |
+          $QUERY.where(...).where(...userId...)
+      - pattern-not: |
+          $QUERY.where(...).andWhere(...userId...)
+    paths:
+      include:
+        - "**/routes/**"
+        - "**/controllers/**"
+        - "**/handlers/**"
+        - "**/api/**"
+
+  # Update/Delete operations with only ID from params
+  - id: hawky.security.idor-update-no-ownership
+    message: |
+      Update/delete operation uses req.params.id without ownership validation.
+      User can modify/delete other users' resources.
+      Add ownership check: .where({ id: req.params.id, userId: req.user.id })
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          # Mongoose/MongoDB
+          - pattern: |
+              $MODEL.findByIdAndUpdate(req.params.$ID, ...)
+          - pattern: |
+              $MODEL.findByIdAndDelete(req.params.$ID)
+          - pattern: |
+              $MODEL.findByIdAndRemove(req.params.$ID)
+          - pattern: |
+              $MODEL.updateOne({ _id: req.params.$ID }, ...)
+          - pattern: |
+              $MODEL.deleteOne({ _id: req.params.$ID })
+          # Prisma
+          - pattern: |
+              $PRISMA.$MODEL.update({ where: { id: req.params.$ID }, ... })
+          - pattern: |
+              $PRISMA.$MODEL.delete({ where: { id: req.params.$ID } })
+          # Sequelize
+          - pattern: |
+              $MODEL.update(..., { where: { id: req.params.$ID } })
+          - pattern: |
+              $MODEL.destroy({ where: { id: req.params.$ID } })
+    paths:
+      include:
+        - "**/routes/**"
+        - "**/controllers/**"
+        - "**/handlers/**"
+        - "**/api/**"
+
+  # File access with user-supplied path
+  - id: hawky.security.idor-file-access
+    message: |
+      File access using user-supplied path may allow unauthorized file access.
+      Validate that the user has permission to access the requested file.
+      Consider using a database lookup with ownership check instead.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: |
+              fs.readFile(...req.params.$PATH...)
+          - pattern: |
+              fs.readFileSync(...req.params.$PATH...)
+          - pattern: |
+              fs.createReadStream(...req.params.$PATH...)
+          - pattern: |
+              res.sendFile(...req.params.$PATH...)
+          - pattern: |
+              res.download(...req.params.$PATH...)
+    paths:
+      include:
+        - "**/routes/**"
+        - "**/controllers/**"
+        - "**/handlers/**"
+        - "**/api/**"
+
+  # GraphQL resolver using args.id directly
+  - id: hawky.security.idor-graphql-resolver
+    message: |
+      GraphQL resolver uses args.id without ownership validation.
+      Add ownership check: findOne({ id: args.id, userId: context.user.id })
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 - Broken Access Control"
+      hawky-rule: true
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $MODEL.findById(args.id)
+          - pattern: |
+              $MODEL.findByPk(args.id)
+          - pattern: |
+              $MODEL.findOne({ where: { id: args.id } })
+          - pattern: |
+              $MODEL.findUnique({ where: { id: args.id } })
+      - pattern-not: |
+          $MODEL.$METHOD({ where: { ..., userId: context.user.id, ... } })
+      - pattern-not: |
+          $MODEL.$METHOD({ where: { ..., userId: context.userId, ... } })
+    paths:
+      include:
+        - "**/resolvers/**"
+        - "**/graphql/**"
+        - "**/*resolver*"
