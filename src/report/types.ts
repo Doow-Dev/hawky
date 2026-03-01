@@ -9,6 +9,33 @@ import type { GateName } from '../config/types';
 import type { GateResult, GateStatus } from '../gates/types';
 
 /**
+ * Tier for coordination findings
+ */
+export type CoordinationTier = 'block' | 'warn' | 'inform';
+
+/**
+ * A single coordination finding
+ *
+ * S096: Coordination Integration
+ */
+export interface CoordinationFinding {
+  /** Which coordination check produced this finding */
+  check: string;
+
+  /** Severity tier */
+  tier: CoordinationTier;
+
+  /** Brief summary of the finding */
+  summary: string;
+
+  /** Detailed message (markdown) */
+  details: string;
+
+  /** Whether this finding should block merge */
+  blocking: boolean;
+}
+
+/**
  * Summary of a single gate's results for reporting
  */
 export interface GateSummary {
@@ -103,6 +130,9 @@ export interface ReportData {
 
   /** PR number (if in PR context) */
   prNumber?: number | undefined;
+
+  /** Coordination findings (S096) */
+  coordinationFindings?: CoordinationFinding[];
 }
 
 /**
@@ -172,4 +202,6 @@ export const GATE_DISPLAY_NAMES: Record<GateName, string> = {
   'npm-audit': 'npm Audit',
   'design-system': 'Design System',
   'frontend-checks': 'Frontend Checks',
+  visual: 'Visual Regression',
+  'llm-review': 'LLM Code Review',
 };

@@ -171,6 +171,37 @@ export async function writeStepSummary(
     // Add spacing
     core.summary.addRaw('\n');
 
+    // Coordination findings section (S096)
+    if (data.coordinationFindings && data.coordinationFindings.length > 0) {
+      core.summary.addHeading('Coordination', 3);
+
+      // Group by tier
+      const blockFindings = data.coordinationFindings.filter((f) => f.tier === 'block');
+      const warnFindings = data.coordinationFindings.filter((f) => f.tier === 'warn');
+      const informFindings = data.coordinationFindings.filter((f) => f.tier === 'inform');
+
+      if (blockFindings.length > 0) {
+        core.summary.addRaw('\u{1F6D1} **Blocking Issues**\n\n');
+        for (const finding of blockFindings) {
+          core.summary.addDetails(finding.summary, finding.details);
+        }
+      }
+
+      if (warnFindings.length > 0) {
+        core.summary.addRaw('\u26A0\uFE0F **Warnings**\n\n');
+        for (const finding of warnFindings) {
+          core.summary.addDetails(finding.summary, finding.details);
+        }
+      }
+
+      if (informFindings.length > 0) {
+        core.summary.addRaw('\u2139\uFE0F **Information**\n\n');
+        for (const finding of informFindings) {
+          core.summary.addDetails(finding.summary, finding.details);
+        }
+      }
+    }
+
     // Failed gates details (collapsible)
     const failedGates = data.gates.filter((g) => g.status === 'fail' || g.status === 'error');
     if (failedGates.length > 0 && config.includeDetails) {
@@ -294,6 +325,59 @@ export function generateStepSummaryMarkdown(
     lines.push(`| ${row.join(' | ')} |`);
   }
   lines.push('');
+
+  // Coordination findings section (S096)
+  if (data.coordinationFindings && data.coordinationFindings.length > 0) {
+    lines.push('### Coordination');
+    lines.push('');
+
+    // Group by tier
+    const blockFindings = data.coordinationFindings.filter((f) => f.tier === 'block');
+    const warnFindings = data.coordinationFindings.filter((f) => f.tier === 'warn');
+    const informFindings = data.coordinationFindings.filter((f) => f.tier === 'inform');
+
+    if (blockFindings.length > 0) {
+      lines.push('\u{1F6D1} **Blocking Issues**');
+      lines.push('');
+      for (const finding of blockFindings) {
+        lines.push('<details>');
+        lines.push(`<summary>${finding.summary}</summary>`);
+        lines.push('');
+        lines.push(finding.details);
+        lines.push('');
+        lines.push('</details>');
+        lines.push('');
+      }
+    }
+
+    if (warnFindings.length > 0) {
+      lines.push('\u26A0\uFE0F **Warnings**');
+      lines.push('');
+      for (const finding of warnFindings) {
+        lines.push('<details>');
+        lines.push(`<summary>${finding.summary}</summary>`);
+        lines.push('');
+        lines.push(finding.details);
+        lines.push('');
+        lines.push('</details>');
+        lines.push('');
+      }
+    }
+
+    if (informFindings.length > 0) {
+      lines.push('\u2139\uFE0F **Information**');
+      lines.push('');
+      for (const finding of informFindings) {
+        lines.push('<details>');
+        lines.push(`<summary>${finding.summary}</summary>`);
+        lines.push('');
+        lines.push(finding.details);
+        lines.push('');
+        lines.push('</details>');
+        lines.push('');
+      }
+    }
+  }
 
   // Failed gates details
   const failedGates = data.gates.filter((g) => g.status === 'fail' || g.status === 'error');

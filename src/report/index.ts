@@ -6,6 +6,8 @@
 
 // Types
 export type {
+  CoordinationFinding,
+  CoordinationTier,
   GateSummary,
   ReportData,
   ReportConfig,

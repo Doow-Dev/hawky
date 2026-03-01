@@ -249,4 +249,89 @@ gates:
       expect(result.config.gates.semgrep.rulesets).toBe('p/owasp-top-ten');
     });
   });
+
+  describe('coordination configuration (S096)', () => {
+    it('applies default coordination config when not specified', () => {
+      fs.writeFileSync(path.join(TEST_CONFIG_DIR, '.hawky.yml'), 'fail_fast: true');
+
+      const result = loadConfig(TEST_CONFIG_DIR);
+
+      expect(result.config.coordination).toBeDefined();
+      expect(result.config.coordination.enabled).toBe(true);
+      expect(result.config.coordination.concurrentPrs).toBe(true);
+      expect(result.config.coordination.contractDivergence).toBe(true);
+      expect(result.config.coordination.parallelMigrations).toBe(true);
+      expect(result.config.coordination.staleBranch).toBe(true);
+      expect(result.config.coordination.sessionHandoff).toBe(false); // opt-in
+      expect(result.config.coordination.authorshipAttribution).toBe(false); // opt-in
+      expect(result.config.coordination.staleBranchCommits).toBe(10);
+      expect(result.config.coordination.staleBranchDays).toBe(2);
+    });
+
+    it('parses coordination master toggle', () => {
+      fs.writeFileSync(path.join(TEST_CONFIG_DIR, '.hawky.yml'), `
+coordination:
+  enabled: false
+`);
+
+      const result = loadConfig(TEST_CONFIG_DIR);
+      expect(result.config.coordination.enabled).toBe(false);
+    });
+
+    it('parses individual check toggles', () => {
+      fs.writeFileSync(path.join(TEST_CONFIG_DIR, '.hawky.yml'), `
+coordination:
+  concurrent_prs: false
+  contract_divergence: false
+  parallel_migrations: false
+  stale_branch: false
+  spec_mismatch: false
+  ownership_collision: false
+  dependency_enforcement: false
+  session_handoff: true
+  test_count_regression: false
+  authorship_attribution: true
+`);
+
+      const result = loadConfig(TEST_CONFIG_DIR);
+      expect(result.config.coordination.concurrentPrs).toBe(false);
+      expect(result.config.coordination.contractDivergence).toBe(false);
+      expect(result.config.coordination.parallelMigrations).toBe(false);
+      expect(result.config.coordination.staleBranch).toBe(false);
+      expect(result.config.coordination.specMismatch).toBe(false);
+      expect(result.config.coordination.ownershipCollision).toBe(false);
+      expect(result.config.coordination.dependencyEnforcement).toBe(false);
+      expect(result.config.coordination.sessionHandoff).toBe(true);
+      expect(result.config.coordination.testCountRegression).toBe(false);
+      expect(result.config.coordination.authorshipAttribution).toBe(true);
+    });
+
+    it('parses stale branch thresholds', () => {
+      fs.writeFileSync(path.join(TEST_CONFIG_DIR, '.hawky.yml'), `
+coordination:
+  stale_branch_commits: 20
+  stale_branch_days: 5
+`);
+
+      const result = loadConfig(TEST_CONFIG_DIR);
+      expect(result.config.coordination.staleBranchCommits).toBe(20);
+      expect(result.config.coordination.staleBranchDays).toBe(5);
+    });
+
+    it('coerces string values to appropriate types', () => {
+      fs.writeFileSync(path.join(TEST_CONFIG_DIR, '.hawky.yml'), `
+coordination:
+  enabled: "true"
+  concurrent_prs: "false"
+  stale_branch_commits: "15"
+  stale_branch_days: "3"
+`);
+
+      const result = loadConfig(TEST_CONFIG_DIR);
+      expect(result.config.coordination.enabled).toBe(true);
+      expect(result.config.coordination.concurrentPrs).toBe(false);
+      expect(result.config.coordination.staleBranchCommits).toBe(15);
+      expect(result.config.coordination.staleBranchDays).toBe(3);
+    });
+  });
 });

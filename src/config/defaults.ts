@@ -5,7 +5,7 @@
  * Matches Sprint 1 behavior from hawky.yml env section.
  */
 
-import type { GateConfig, GateName, GracePeriodConfig, HawkyConfig } from './types';
+import type { CoordinationConfig, GateConfig, GateName, GracePeriodConfig, HawkyConfig, VisualConfig } from './types';
 
 /**
  * Default configuration for the TypeScript gate
@@ -92,6 +92,24 @@ export const FRONTEND_CHECKS_GATE_DEFAULTS: GateConfig = {
 };
 
 /**
+ * Default configuration for the visual gate
+ */
+export const VISUAL_GATE_DEFAULTS: GateConfig = {
+  enabled: false, // opt-in: requires visual config with routes
+  blocking: false,
+  timeout: 600, // 10 minutes - screenshots can be slow
+};
+
+/**
+ * Default configuration for the LLM review gate
+ */
+export const LLM_REVIEW_GATE_DEFAULTS: GateConfig = {
+  enabled: false, // opt-in: requires LLM API credentials
+  blocking: false, // LLM findings are suggestions, not blockers
+  timeout: 120, // 2 minutes - LLM calls can be slow
+};
+
+/**
  * Map of gate names to their default configurations
  */
 export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
@@ -104,6 +122,8 @@ export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
   'npm-audit': NPM_AUDIT_GATE_DEFAULTS,
   'design-system': DESIGN_SYSTEM_GATE_DEFAULTS,
   'frontend-checks': FRONTEND_CHECKS_GATE_DEFAULTS,
+  visual: VISUAL_GATE_DEFAULTS,
+  'llm-review': LLM_REVIEW_GATE_DEFAULTS,
 };
 
 /**
@@ -115,12 +135,52 @@ export const GRACE_PERIOD_DEFAULTS: GracePeriodConfig = {
 };
 
 /**
+ * Default visual testing configuration
+ */
+export const VISUAL_DEFAULTS: VisualConfig = {
+  enabled: false,
+  threshold: 0.1,
+  viewports: [{ width: 1920, height: 1080, name: 'desktop' }],
+  routes: [],
+  timeout: 30000,
+};
+
+/**
+ * Default coordination configuration
+ *
+ * S096: Coordination Integration
+ *
+ * Tiers:
+ * - BLOCK: contractDivergence (S036), parallelMigrations (S037), dependencyEnforcement (S041)
+ * - WARN: concurrentPrs (S035), staleBranch (S038), specMismatch (S039),
+ *         ownershipCollision (S040), testCountRegression (S043)
+ * - OPT-IN: sessionHandoff (S042), authorshipAttribution (S045)
+ */
+export const COORDINATION_DEFAULTS: CoordinationConfig = {
+  enabled: true,
+  concurrentPrs: true,
+  contractDivergence: true,
+  parallelMigrations: true,
+  staleBranch: true,
+  specMismatch: true,
+  ownershipCollision: true,
+  dependencyEnforcement: true,
+  sessionHandoff: false, // opt-in: requires team config
+  testCountRegression: true,
+  authorshipAttribution: false, // opt-in: requires team config
+  staleBranchCommits: 10,
+  staleBranchDays: 2,
+};
+
+/**
  * Complete default configuration
  */
 export const DEFAULT_CONFIG: HawkyConfig = {
   failFast: true,
   gates: { ...GATE_DEFAULTS },
   gracePeriod: { ...GRACE_PERIOD_DEFAULTS },
+  visual: { ...VISUAL_DEFAULTS },
+  coordination: { ...COORDINATION_DEFAULTS },
 };
 
 /**
@@ -140,7 +200,11 @@ export function createDefaultConfig(): HawkyConfig {
       'npm-audit': { ...NPM_AUDIT_GATE_DEFAULTS },
       'design-system': { ...DESIGN_SYSTEM_GATE_DEFAULTS },
       'frontend-checks': { ...FRONTEND_CHECKS_GATE_DEFAULTS },
+      visual: { ...VISUAL_GATE_DEFAULTS },
+      'llm-review': { ...LLM_REVIEW_GATE_DEFAULTS },
     },
     gracePeriod: { ...GRACE_PERIOD_DEFAULTS },
+    visual: { ...VISUAL_DEFAULTS },
+    coordination: { ...COORDINATION_DEFAULTS },
   };
 }
