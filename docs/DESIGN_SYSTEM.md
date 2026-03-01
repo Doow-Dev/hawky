@@ -6,15 +6,15 @@ Hawky's design system gate enforces design token compliance in your CSS and comp
 
 The design system gate detects:
 
-1. **Banned Tailwind Classes** (S026) - Deprecated or arbitrary utility classes
-2. **Hardcoded Colors** (S027) - Raw hex/rgb values instead of design tokens
-3. **Non-Scale Spacing** (S028) - Arbitrary spacing values outside your scale
-4. **Arbitrary Font Sizes** (S029) - Font sizes not in your typography scale
-5. **Component Duplication** (S030) - Similar component patterns that should be unified
-6. **Existing Component Suggestions** (S031) - When existing components could be reused
-7. **CSS Variable Opacity Anti-Pattern** (S032) - Improper opacity handling
-8. **Design Token Blast Radius** (S033) - Changes to tokens that affect many components
-9. **Tailwind Class Conflicts** (S034) - Conflicting utility classes
+1. **Banned Tailwind Classes** - Deprecated or arbitrary utility classes
+2. **Hardcoded Colors** - Raw hex/rgb values instead of design tokens
+3. **Non-Scale Spacing** - Arbitrary spacing values outside your scale
+4. **Arbitrary Font Sizes** - Font sizes not in your typography scale
+5. **Component Duplication** - Similar component patterns that should be unified
+6. **Existing Component Suggestions** - When existing components could be reused
+7. **CSS Variable Opacity Anti-Pattern** - Improper opacity handling
+8. **Design Token Blast Radius** - Changes to tokens that affect many components
+9. **Tailwind Class Conflicts** - Conflicting utility classes
 
 ## Configuration
 

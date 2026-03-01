@@ -182,18 +182,18 @@ coordination:
   enabled: true  # Master toggle (default: true)
 
   # Individual checks — BLOCK tier (can fail the action)
-  contract_divergence: true   # S036 - Detect conflicting API contract changes
-  parallel_migrations: true   # S037 - Detect concurrent DB migrations
-  dependency_enforcement: true # S041 - Enforce dependency ordering
+  contract_divergence: true   # Detect conflicting API contract changes
+  parallel_migrations: true   # Detect concurrent DB migrations
+  dependency_enforcement: true # Enforce dependency ordering
 
   # Individual checks — WARN tier (non-blocking)
-  concurrent_prs: true        # S035 - Detect PRs modifying same files
-  stale_branch: true          # S038 - Warn when branch is behind main
-  spec_mismatch: true         # S039 - Detect spec/implementation drift
-  ownership_collision: true   # S040 - Detect ownership conflicts
-  session_handoff: false      # S042 - Generate handoff notes (opt-in)
-  test_count_regression: true # S043 - Detect test count drops
-  authorship_attribution: false # S045 - Track mixed authorship (opt-in)
+  concurrent_prs: true        # Detect PRs modifying same files
+  stale_branch: true          # Warn when branch is behind main
+  spec_mismatch: true         # Detect spec/implementation drift
+  ownership_collision: true   # Detect ownership conflicts
+  session_handoff: false      # Generate handoff notes (opt-in)
+  test_count_regression: true # Detect test count drops
+  authorship_attribution: false # Track mixed authorship (opt-in)
 
   # Thresholds
   stale_branch_commits: 10    # Commits behind main to trigger warning
@@ -202,18 +202,18 @@ coordination:
 
 #### Coordination Checks Reference
 
-| Check | Story | Tier | Default | Description |
-|-------|-------|------|---------|-------------|
-| `concurrent_prs` | S035 | WARN | on | Detects other open PRs modifying the same files |
-| `contract_divergence` | S036 | BLOCK | on | Detects conflicting API contract changes |
-| `parallel_migrations` | S037 | BLOCK | on | Detects concurrent database migrations |
-| `stale_branch` | S038 | WARN | on | Warns when branch is significantly behind main |
-| `spec_mismatch` | S039 | WARN | on | Detects drift between specs and implementation |
-| `ownership_collision` | S040 | WARN | on | Detects files owned by multiple teams being modified |
-| `dependency_enforcement` | S041 | BLOCK | on | Enforces PR dependency ordering |
-| `session_handoff` | S042 | WARN | off | Generates handoff notifications for team context |
-| `test_count_regression` | S043 | WARN | on | Detects when test count decreases |
-| `authorship_attribution` | S045 | WARN | off | Tracks mixed human/AI authorship |
+| Check | Tier | Default | Description |
+|-------|------|---------|-------------|
+| `concurrent_prs` | WARN | on | Detects other open PRs modifying the same files |
+| `contract_divergence` | BLOCK | on | Detects conflicting API contract changes |
+| `parallel_migrations` | BLOCK | on | Detects concurrent database migrations |
+| `stale_branch` | WARN | on | Warns when branch is significantly behind main |
+| `spec_mismatch` | WARN | on | Detects drift between specs and implementation |
+| `ownership_collision` | WARN | on | Detects files owned by multiple teams being modified |
+| `dependency_enforcement` | BLOCK | on | Enforces PR dependency ordering |
+| `session_handoff` | WARN | off | Generates handoff notifications for team context |
+| `test_count_regression` | WARN | on | Detects when test count decreases |
+| `authorship_attribution` | WARN | off | Tracks mixed human/AI authorship |
 
 **BLOCK tier** checks will fail the GitHub Action if violations are found.
 **WARN tier** checks add warnings to the PR comment but do not block merge.

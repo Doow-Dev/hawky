@@ -152,7 +152,7 @@ Line 58 in DATA_CONTRACTS.md
 
 ## Contract Divergence Check
 
-The `contract_divergence` coordination check (S036) detects when multiple PRs modify the same API contracts:
+The `contract_divergence` coordination check detects when multiple PRs modify the same API contracts:
 
 ```yaml
 coordination:

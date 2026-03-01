@@ -69,16 +69,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Suppression Dashboard** - PR comment shows all suppressions with justification status
 
 #### Coordination Checks
-- **Concurrent PR Detection (S035)** - Warn when multiple PRs modify the same files
-- **Contract Divergence Detection (S036)** - Block when API contract changes conflict with frontend PRs
-- **Parallel Migration Detection (S037)** - Block when multiple PRs contain database migrations
-- **Stale Branch Warning (S038)** - Warn when branch is significantly behind main (configurable threshold)
-- **Spec Version Mismatch (S039)** - Detect drift between specs and implementation
-- **Ownership Collision Detection (S040)** - Warn when cross-team file modifications detected
-- **Dependency Enforcement (S041)** - Block PRs until dependent stories are merged
-- **Session Handoff Notifications (S042)** - Generate handoff notifications on merge (opt-in)
-- **Test Count Regression (S043)** - Warn when test count decreases
-- **Authorship Attribution (S045)** - Track mixed human/AI authorship (opt-in)
+- **Concurrent PR Detection** - Warn when multiple PRs modify the same files
+- **Contract Divergence Detection** - Block when API contract changes conflict with frontend PRs
+- **Parallel Migration Detection** - Block when multiple PRs contain database migrations
+- **Stale Branch Warning** - Warn when branch is significantly behind main (configurable threshold)
+- **Spec Version Mismatch** - Detect drift between specs and implementation
+- **Ownership Collision Detection** - Warn when cross-team file modifications detected
+- **Dependency Enforcement** - Block PRs until dependent PRs are merged
+- **Session Handoff Notifications** - Generate handoff notifications on merge (opt-in)
+- **Test Count Regression** - Warn when test count decreases
+- **Authorship Attribution** - Track mixed human/AI authorship (opt-in)
 
 #### Sprint Integration
 - **Story ID Validation** - Verify PR references valid sprint story from SPRINT.md
