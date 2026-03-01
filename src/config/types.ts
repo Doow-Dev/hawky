@@ -8,7 +8,16 @@
 /**
  * Gate names supported by Hawky
  */
-export type GateName = 'typescript' | 'build' | 'test' | 'eslint' | 'semgrep' | 'gitleaks';
+export type GateName =
+  | 'typescript'
+  | 'build'
+  | 'test'
+  | 'eslint'
+  | 'semgrep'
+  | 'gitleaks'
+  | 'npm-audit'
+  | 'design-system'
+  | 'frontend-checks';
 
 /**
  * All valid gate names
@@ -20,6 +29,9 @@ export const GATE_NAMES: GateName[] = [
   'eslint',
   'semgrep',
   'gitleaks',
+  'npm-audit',
+  'design-system',
+  'frontend-checks',
 ];
 
 /**
