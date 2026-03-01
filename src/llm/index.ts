@@ -72,3 +72,16 @@ export {
   parseAcceptanceCriteria,
   formatComplianceAsMarkdown,
 } from './spec-compliance';
+
+export {
+  // Types
+  type LLMCommentOptions,
+  type LLMFindings,
+  type LLMCommentResult,
+  // Constants
+  LLM_COMMENT_MARKER,
+  // Functions
+  formatLLMComment,
+  generateGitHubLineLink,
+  generateLLMStatusBadge,
+} from './pr-comment-formatter';
