@@ -41,6 +41,7 @@ import {
   GATE_DISPLAY_NAMES,
   type ReportData,
   type GateSummary,
+  type SuppressionEntry,
 } from './report';
 
 /**
@@ -97,19 +98,31 @@ function getInputs(): HawkyInputs {
 }
 
 /**
+ * Result of filtering violations through baseline and hawkyignore
+ */
+interface FilterResult {
+  /** Updated gate result with correct counts */
+  gateResult: GateResult;
+  /** Detailed suppression entries for the dashboard */
+  suppressions: SuppressionEntry[];
+}
+
+/**
  * Filter violations through baseline and hawkyignore
- * Returns updated GateResult with correct counts and filtered annotations
+ * Returns updated GateResult with correct counts and filtered annotations,
+ * plus detailed suppression entries for the dashboard.
  */
 function filterViolations(
   result: GateResult,
   baseline: Baseline | null,
   ignorePatterns: IgnorePattern[],
   cwd: string
-): GateResult {
+): FilterResult {
   const newViolations: Violation[] = [];
   const existingViolations: Violation[] = [];
   const ignoredViolations: Violation[] = [];
   const newAnnotations: Annotation[] = [];
+  const suppressions: SuppressionEntry[] = [];
 
   for (const violation of result.violations) {
     // Check hawkyignore first
@@ -118,6 +131,23 @@ function filterViolations(
 
     if (ignoreResult.ignored) {
       ignoredViolations.push(violation);
+
+      // Track suppression details for dashboard
+      // The "reason" from ignoreResult is the raw pattern line from .hawkyignore
+      // A proper reason would include a comment after the pattern
+      const reason = ignoreResult.reason || null;
+      suppressions.push({
+        file: violation.file,
+        line: violation.line,
+        rule: gatePrefix,
+        gate: violation.gate,
+        reason,
+        // A suppression "has a reason" if there's explanatory text
+        // For now, we consider all suppressions without comments as lacking reason
+        // The pattern itself is not a justification
+        hasReason: false, // Will be improved when .hawkyignore supports inline comments
+      });
+
       continue;
     }
 
@@ -158,13 +188,16 @@ function filterViolations(
         : result.message;
 
   return {
-    ...result,
-    status,
-    newViolations: newViolations.length,
-    existingViolations: existingViolations.length,
-    ignoredViolations: ignoredViolations.length,
-    annotations: newAnnotations,
-    message,
+    gateResult: {
+      ...result,
+      status,
+      newViolations: newViolations.length,
+      existingViolations: existingViolations.length,
+      ignoredViolations: ignoredViolations.length,
+      annotations: newAnnotations,
+      message,
+    },
+    suppressions,
   };
 }
 
@@ -379,6 +412,7 @@ async function run(): Promise<void> {
 
     // S100-S103: Run individual gates
     const gateResults: GateResult[] = [];
+    const allSuppressions: SuppressionEntry[] = [];
     let gatesPassed = 0;
     let gatesFailed = 0;
     let hasBlockingFailure = false;
@@ -408,7 +442,9 @@ async function run(): Promise<void> {
 
         // Apply baseline and hawkyignore filtering
         if (result.violations.length > 0) {
-          result = filterViolations(result, baseline, ignorePatterns, cwd);
+          const filterResult = filterViolations(result, baseline, ignorePatterns, cwd);
+          result = filterResult.gateResult;
+          allSuppressions.push(...filterResult.suppressions);
         }
       } else if (gateName === 'eslint') {
         // S101: ESLint Gate
@@ -420,7 +456,9 @@ async function run(): Promise<void> {
 
         // Apply baseline and hawkyignore filtering
         if (result.violations.length > 0) {
-          result = filterViolations(result, baseline, ignorePatterns, cwd);
+          const filterResult = filterViolations(result, baseline, ignorePatterns, cwd);
+          result = filterResult.gateResult;
+          allSuppressions.push(...filterResult.suppressions);
         }
       } else if (gateName === 'semgrep') {
         // S102: Semgrep Gate
@@ -436,7 +474,9 @@ async function run(): Promise<void> {
 
         // Apply baseline and hawkyignore filtering
         if (result.violations.length > 0) {
-          result = filterViolations(result, baseline, ignorePatterns, cwd);
+          const filterResult = filterViolations(result, baseline, ignorePatterns, cwd);
+          result = filterResult.gateResult;
+          allSuppressions.push(...filterResult.suppressions);
         }
       } else if (gateName === 'gitleaks') {
         // S103: Gitleaks Gate
@@ -450,7 +490,9 @@ async function run(): Promise<void> {
         // IMPORTANT: Unlike other gates, we should log a WARNING if secrets are in baseline
         // Secrets should never be "grandfathered" — they need to be removed or rotated
         if (result.violations.length > 0) {
-          result = filterViolations(result, baseline, ignorePatterns, cwd);
+          const filterResult = filterViolations(result, baseline, ignorePatterns, cwd);
+          result = filterResult.gateResult;
+          allSuppressions.push(...filterResult.suppressions);
 
           // If any secrets were filtered by baseline, log a security warning
           if (result.existingViolations > 0) {
@@ -588,6 +630,7 @@ async function run(): Promise<void> {
       gracePeriodEndDate: config.gracePeriod.endDate ?? undefined,
       hawkyignoreActive: ignorePatterns.length > 0,
       hawkyignorePatternCount,
+      suppressions: allSuppressions,
       failFastSkippedGates,
       disabledGates,
       commitSha: context.sha || process.env['GITHUB_SHA'] || 'unknown',
@@ -595,6 +638,13 @@ async function run(): Promise<void> {
       repository: `${context.repo.owner}/${context.repo.repo}`,
       prNumber: context.payload.pull_request?.number,
     };
+
+    // S085: Log warning for high suppression count
+    if (allSuppressions.length > 5) {
+      core.warning(
+        `> 5 suppressions (${allSuppressions.length}) — review justifications in .hawkyignore`
+      );
+    }
 
     // Post PR comment
     const commentResult = await postPRComment(reportData, inputs.githubToken);

@@ -9,6 +9,7 @@ export type {
   GateSummary,
   ReportData,
   ReportConfig,
+  SuppressionEntry,
 } from './types';
 
 export {

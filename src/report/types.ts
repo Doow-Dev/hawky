@@ -9,6 +9,30 @@ import type { GateName } from '../config/types';
 import type { GateResult, GateStatus } from '../gates/types';
 
 /**
+ * A single suppression entry for the dashboard
+ * Represents a violation that was ignored via .hawkyignore
+ */
+export interface SuppressionEntry {
+  /** File path (relative to repo root) */
+  file: string;
+
+  /** Line number (1-indexed) */
+  line: number;
+
+  /** Rule ID with gate prefix (e.g., "eslint:no-console") */
+  rule: string;
+
+  /** Which gate detected the original violation */
+  gate: GateName;
+
+  /** Reason from .hawkyignore (the matching pattern line) */
+  reason: string | null;
+
+  /** Whether this suppression lacks a proper justification */
+  hasReason: boolean;
+}
+
+/**
  * Summary of a single gate's results for reporting
  */
 export interface GateSummary {
@@ -85,6 +109,9 @@ export interface ReportData {
 
   /** Number of patterns in hawkyignore */
   hawkyignorePatternCount: number;
+
+  /** Detailed suppression entries for the dashboard */
+  suppressions: SuppressionEntry[];
 
   /** Gates that were skipped due to fail-fast */
   failFastSkippedGates: GateName[];
