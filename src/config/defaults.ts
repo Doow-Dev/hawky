@@ -87,6 +87,15 @@ export const DESIGN_SYSTEM_GATE_DEFAULTS: GateConfig = {
 };
 
 /**
+ * Default configuration for the Frontend Checks gate
+ */
+export const FRONTEND_CHECKS_GATE_DEFAULTS: GateConfig = {
+  enabled: false, // Opt-in by default — requires React/Next.js project
+  blocking: false, // Non-blocking by default — these are warnings
+  timeout: 120, // 2 minutes — static analysis is fast
+};
+
+/**
  * Map of gate names to their default configurations
  */
 export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
@@ -98,6 +107,7 @@ export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
   gitleaks: GITLEAKS_GATE_DEFAULTS,
   'npm-audit': NPM_AUDIT_GATE_DEFAULTS,
   'design-system': DESIGN_SYSTEM_GATE_DEFAULTS,
+  'frontend-checks': FRONTEND_CHECKS_GATE_DEFAULTS,
 };
 
 /**
@@ -133,6 +143,7 @@ export function createDefaultConfig(): HawkyConfig {
       gitleaks: { ...GITLEAKS_GATE_DEFAULTS },
       'npm-audit': { ...NPM_AUDIT_GATE_DEFAULTS },
       'design-system': { ...DESIGN_SYSTEM_GATE_DEFAULTS },
+      'frontend-checks': { ...FRONTEND_CHECKS_GATE_DEFAULTS },
     },
     gracePeriod: { ...GRACE_PERIOD_DEFAULTS },
   };
