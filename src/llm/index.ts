@@ -124,3 +124,22 @@ export {
   formatConfidenceLabel,
   formatConfidenceNote,
 } from './confidence';
+
+export {
+  // Types
+  type FeedbackOutcome,
+  type FeedbackEntry,
+  type FeedbackMetrics,
+  type CategoryMetrics,
+  type FeedbackFile,
+  // Constants
+  DEFAULT_FEEDBACK_PATH,
+  // Functions
+  loadFeedback,
+  saveFeedback,
+  createEmptyFeedback,
+  recordFeedback,
+  recordFeedbackBatch,
+  computeMetrics,
+  formatMetricsAsMarkdown,
+} from './feedback';
