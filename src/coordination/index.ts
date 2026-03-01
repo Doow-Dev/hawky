@@ -54,3 +54,16 @@ export {
   detectTestCountRegression,
   formatTestCountRegressionWarning,
 } from './test-count-regression';
+
+export {
+  // Types
+  type CommitAuthor,
+  type AuthorshipResult,
+  type AuthorshipOptions,
+  type AuthorshipOctokitLike,
+  // Functions
+  tallyAuthors,
+  getPrimaryAuthor,
+  detectMixedAuthorship,
+  formatAuthorshipAttribution,
+} from './authorship-attribution';
