@@ -65,6 +65,33 @@ export const GITLEAKS_GATE_DEFAULTS: GateConfig = {
 };
 
 /**
+ * Default configuration for the npm-audit gate
+ */
+export const NPM_AUDIT_GATE_DEFAULTS: GateConfig = {
+  enabled: true,
+  blocking: true,
+  timeout: 300, // 5 minutes
+};
+
+/**
+ * Default configuration for the design-system gate
+ */
+export const DESIGN_SYSTEM_GATE_DEFAULTS: GateConfig = {
+  enabled: false, // opt-in: only runs when design system is configured
+  blocking: false,
+  timeout: 300, // 5 minutes
+};
+
+/**
+ * Default configuration for the frontend-checks gate
+ */
+export const FRONTEND_CHECKS_GATE_DEFAULTS: GateConfig = {
+  enabled: false, // opt-in: only runs in React/Next.js projects
+  blocking: false,
+  timeout: 300, // 5 minutes
+};
+
+/**
  * Map of gate names to their default configurations
  */
 export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
@@ -74,6 +101,9 @@ export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
   eslint: ESLINT_GATE_DEFAULTS,
   semgrep: SEMGREP_GATE_DEFAULTS,
   gitleaks: GITLEAKS_GATE_DEFAULTS,
+  'npm-audit': NPM_AUDIT_GATE_DEFAULTS,
+  'design-system': DESIGN_SYSTEM_GATE_DEFAULTS,
+  'frontend-checks': FRONTEND_CHECKS_GATE_DEFAULTS,
 };
 
 /**
@@ -107,6 +137,9 @@ export function createDefaultConfig(): HawkyConfig {
       eslint: { ...ESLINT_GATE_DEFAULTS },
       semgrep: { ...SEMGREP_GATE_DEFAULTS },
       gitleaks: { ...GITLEAKS_GATE_DEFAULTS },
+      'npm-audit': { ...NPM_AUDIT_GATE_DEFAULTS },
+      'design-system': { ...DESIGN_SYSTEM_GATE_DEFAULTS },
+      'frontend-checks': { ...FRONTEND_CHECKS_GATE_DEFAULTS },
     },
     gracePeriod: { ...GRACE_PERIOD_DEFAULTS },
   };

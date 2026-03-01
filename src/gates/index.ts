@@ -47,3 +47,26 @@ export {
   getChangedFiles as gitleaksGetChangedFiles,
   violationToAnnotation as gitleaksViolationToAnnotation,
 } from './gitleaks';
+
+// Frontend Checks Gate
+export {
+  frontendChecksGate,
+  scanForUnhandledAsyncState,
+  scanForMissingKeys,
+  scanForMissingDependencies,
+  scanForRerenderTraps,
+  scanForServerClientBoundary,
+  scanForA11yIssues,
+  calculateBundleDelta,
+  scanForImageWithoutDimensions,
+  scanForTypeScriptStrictIssues,
+  buildDependencyGraph,
+  detectCycles,
+  scanForImportCycles,
+  buildComponentGraph,
+  analyzeComponentGraphImpact,
+  scanForImportPathInconsistency,
+  violationToAnnotation as frontendViolationToAnnotation,
+  type BundleSizeDelta,
+  type ComponentGraphEntry,
+} from './frontend-checks';
