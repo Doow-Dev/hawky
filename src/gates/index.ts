@@ -47,3 +47,13 @@ export {
   getChangedFiles as gitleaksGetChangedFiles,
   violationToAnnotation as gitleaksViolationToAnnotation,
 } from './gitleaks';
+
+// Design System Gate
+export {
+  designSystemGate,
+  scanForBannedClasses,
+  scanForHardcodedColors,
+  scanForSpacingViolations,
+  scanForFontSizeViolations,
+  violationToAnnotation as designSystemViolationToAnnotation,
+} from './design-system';
