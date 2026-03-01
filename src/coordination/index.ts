@@ -128,3 +128,18 @@ export {
   anyFileMatches,
   generateHandoffNotifications,
 } from './session-handoff';
+
+export {
+  // Types
+  type UnmetDependency,
+  type MetDependency,
+  type DependencyEnforcementResult,
+  type DependencyEnforcementOptions,
+  type DependencyOctokitLike,
+  // Functions
+  extractCurrentStoryId,
+  parseDependencies,
+  checkStoryMerged,
+  enforceDependencies,
+  formatDependencyBlock,
+} from './dependency-enforcement';
