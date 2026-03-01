@@ -1,12 +1,8 @@
 /**
  * LLM Provider Integration
  *
- * Multi-provider LLM client with ARIA Tasks (Azure-hosted Kimi) as primary.
- * Supports OpenAI and Anthropic as fallbacks.
- *
- * ARIA Tasks is the Azure AI Foundry-hosted Kimi deployment used for
- * automated tasks like code review. It uses the OpenAI-compatible API
- * with Azure authentication.
+ * ARIA Tasks client for Hawky code review.
+ * Uses Azure AI Foundry-hosted Kimi (kimi-2.5) for semantic code review.
  *
  * Features:
  * - Rate limiting with token bucket
@@ -20,16 +16,6 @@
 // ============================================================================
 
 /**
- * Supported LLM providers
- *
- * - aria-tasks: Azure-hosted Kimi (ARIA Tasks) - primary provider
- * - kimi: Public Moonshot API (fallback)
- * - openai: OpenAI API
- * - anthropic: Anthropic API
- */
-export type LLMProvider = 'aria-tasks' | 'kimi' | 'openai' | 'anthropic';
-
-/**
  * Chat message format (OpenAI-compatible)
  */
 export interface ChatMessage {
@@ -38,26 +24,23 @@ export interface ChatMessage {
 }
 
 /**
- * LLM configuration from .hawky.yml
+ * LLM configuration
  */
 export interface LLMConfig {
-  /** Provider to use */
-  provider: LLMProvider;
-
-  /** API key (usually from environment variable) */
+  /** API key (from AZURE_AI_FOUNDRY_KEY) */
   apiKey: string;
 
-  /** Custom endpoint URL (required for aria-tasks, optional for others) */
-  endpoint?: string | undefined;
+  /** Azure AI Foundry endpoint URL */
+  endpoint: string;
 
-  /** Model name */
+  /** Model name (default: kimi-2.5) */
   model: string;
 
   /** Temperature (0-1, lower = more deterministic) */
   temperature: number;
 
   /** Maximum tokens in response */
-  maxTokens?: number;
+  maxTokens: number;
 
   /** Timeout in milliseconds */
   timeoutMs: number;
@@ -66,99 +49,27 @@ export interface LLMConfig {
   trackCost?: boolean;
 
   /** Rate limit: max requests per minute */
-  rateLimit?: number;
+  rateLimit: number;
 }
 
 /**
- * Default configurations per provider
+ * Default configuration for ARIA Tasks
  */
-export const DEFAULT_CONFIGS: Record<LLMProvider, Partial<LLMConfig>> = {
-  // ARIA Tasks - Azure-hosted Kimi (primary provider)
-  'aria-tasks': {
-    model: 'kimi-2.5',
-    temperature: 0.3,
-    maxTokens: 4096,
-    timeoutMs: 60000,
-    rateLimit: 60, // 60 requests per minute
-  },
-  // Public Moonshot API (fallback)
-  kimi: {
-    model: 'moonshot-v1-8k',
-    temperature: 0.3,
-    maxTokens: 4096,
-    timeoutMs: 60000,
-    rateLimit: 60,
-  },
-  openai: {
-    model: 'gpt-4-turbo-preview',
-    temperature: 0.3,
-    maxTokens: 4096,
-    timeoutMs: 60000,
-    rateLimit: 60,
-  },
-  anthropic: {
-    model: 'claude-3-haiku-20240307',
-    temperature: 0.3,
-    maxTokens: 4096,
-    timeoutMs: 60000,
-    rateLimit: 60,
-  },
+export const DEFAULT_CONFIG: Omit<LLMConfig, 'apiKey' | 'endpoint'> = {
+  model: 'kimi-2.5',
+  temperature: 0.3,
+  maxTokens: 4096,
+  timeoutMs: 60000,
+  rateLimit: 60,
 };
 
 /**
  * Cost per 1K tokens (approximate, in USD)
  */
-export const TOKEN_COSTS: Record<
-  LLMProvider,
-  { input: number; output: number }
-> = {
-  'aria-tasks': { input: 0.012, output: 0.012 }, // Azure-hosted Kimi
-  kimi: { input: 0.012, output: 0.012 }, // Public Kimi pricing
-  openai: { input: 0.01, output: 0.03 }, // GPT-4 Turbo
-  anthropic: { input: 0.00025, output: 0.00125 }, // Claude 3 Haiku
+export const TOKEN_COSTS = {
+  input: 0.012,
+  output: 0.012,
 };
-
-/**
- * API endpoints per provider
- *
- * Note: aria-tasks uses a dynamic endpoint from ARIA_TASKS_ENDPOINT env var.
- * The placeholder here is never used directly - getEndpoint() handles it.
- */
-const API_ENDPOINTS: Record<LLMProvider, string> = {
-  'aria-tasks': '', // Dynamic - from ARIA_TASKS_ENDPOINT env var
-  kimi: 'https://api.moonshot.cn/v1/chat/completions',
-  openai: 'https://api.openai.com/v1/chat/completions',
-  anthropic: 'https://api.anthropic.com/v1/messages',
-};
-
-/**
- * Get the API endpoint for a provider
- *
- * ARIA Tasks uses Azure AI Foundry with a user-provided endpoint.
- */
-function getEndpoint(provider: LLMProvider, customEndpoint?: string): string {
-  if (provider === 'aria-tasks') {
-    // ARIA Tasks requires an endpoint from config or environment
-    // Primary: AZURE_AI_FOUNDRY_ENDPOINT (GitHub Actions)
-    // Fallback: ARIA_TASKS_ENDPOINT (local dev)
-    const endpoint = customEndpoint ||
-                     process.env['AZURE_AI_FOUNDRY_ENDPOINT'] ||
-                     process.env['ARIA_TASKS_ENDPOINT'];
-    if (!endpoint) {
-      throw new Error(
-        'ARIA Tasks requires AZURE_AI_FOUNDRY_ENDPOINT environment variable. ' +
-        'Set it to your Azure AI Foundry endpoint (e.g., https://your-resource.openai.azure.com). ' +
-        'For local dev, you can use ARIA_TASKS_ENDPOINT instead.'
-      );
-    }
-    // Azure OpenAI uses /openai/deployments/{model}/chat/completions path
-    // But when using OpenAI SDK compatibility mode, we use /v1/chat/completions
-    return endpoint.endsWith('/')
-      ? `${endpoint}v1/chat/completions`
-      : `${endpoint}/v1/chat/completions`;
-  }
-  return API_ENDPOINTS[provider];
-}
 
 /**
  * Response from chat completion
@@ -179,9 +90,6 @@ export interface ChatResponse {
   /** Response latency in ms */
   latencyMs: number;
 
-  /** Provider used */
-  provider: LLMProvider;
-
   /** Model used */
   model: string;
 }
@@ -193,7 +101,6 @@ export class LLMError extends Error {
   constructor(
     message: string,
     public readonly code: LLMErrorCode,
-    public readonly provider: LLMProvider,
     public readonly retryable: boolean = false
   ) {
     super(message);
@@ -213,6 +120,7 @@ export type LLMErrorCode =
   | 'INVALID_REQUEST'
   | 'SERVER_ERROR'
   | 'NETWORK_ERROR'
+  | 'MISSING_CONFIG'
   | 'UNKNOWN';
 
 // ============================================================================
@@ -296,7 +204,6 @@ export class CostTracker {
     totalTokens: number;
     totalCost: number;
     requestCount: number;
-    averageLatencyMs: number;
   } {
     return {
       totalInputTokens: this.totalInputTokens,
@@ -304,7 +211,6 @@ export class CostTracker {
       totalTokens: this.totalInputTokens + this.totalOutputTokens,
       totalCost: this.totalCost,
       requestCount: this.requestCount,
-      averageLatencyMs: 0, // Would need to track this
     };
   }
 
@@ -324,34 +230,37 @@ export class CostTracker {
 // ============================================================================
 
 /**
- * LLM Client with multi-provider support
+ * ARIA Tasks LLM Client
+ *
+ * Connects to Azure AI Foundry-hosted Kimi for semantic code review.
  */
 export class LLMClient {
   private readonly config: LLMConfig;
   private readonly rateLimiter: RateLimiter;
   private readonly costTracker: CostTracker;
 
-  constructor(config: Partial<LLMConfig> & { apiKey: string }) {
-    // Default to aria-tasks (Azure-hosted Kimi) as primary provider
-    const provider = config.provider || 'aria-tasks';
-    const defaults = DEFAULT_CONFIGS[provider];
-
-    const maxTokens = config.maxTokens ?? defaults.maxTokens ?? 4096;
-    const rateLimit = config.rateLimit ?? defaults.rateLimit ?? 60;
-
+  constructor(config: {
+    apiKey: string;
+    endpoint: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    timeoutMs?: number;
+    trackCost?: boolean;
+    rateLimit?: number;
+  }) {
     this.config = {
-      provider,
       apiKey: config.apiKey,
       endpoint: config.endpoint,
-      model: config.model || defaults.model || 'kimi-2.5',
-      temperature: config.temperature ?? defaults.temperature ?? 0.3,
-      maxTokens,
-      timeoutMs: config.timeoutMs ?? defaults.timeoutMs ?? 60000,
+      model: config.model ?? DEFAULT_CONFIG.model,
+      temperature: config.temperature ?? DEFAULT_CONFIG.temperature,
+      maxTokens: config.maxTokens ?? DEFAULT_CONFIG.maxTokens,
+      timeoutMs: config.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
       trackCost: config.trackCost ?? false,
-      rateLimit,
+      rateLimit: config.rateLimit ?? DEFAULT_CONFIG.rateLimit,
     };
 
-    this.rateLimiter = new RateLimiter(rateLimit);
+    this.rateLimiter = new RateLimiter(this.config.rateLimit);
     this.costTracker = new CostTracker();
   }
 
@@ -418,10 +327,19 @@ export class LLMClient {
    */
   private async makeRequest(messages: ChatMessage[]): Promise<ChatResponse> {
     const startTime = Date.now();
-    const endpoint = getEndpoint(this.config.provider, this.config.endpoint);
 
-    // Build request body based on provider
-    const body = this.buildRequestBody(messages);
+    // Build endpoint URL
+    const endpoint = this.config.endpoint.endsWith('/')
+      ? `${this.config.endpoint}v1/chat/completions`
+      : `${this.config.endpoint}/v1/chat/completions`;
+
+    // Build request body (OpenAI-compatible format)
+    const body = {
+      model: this.config.model,
+      messages,
+      temperature: this.config.temperature,
+      max_tokens: this.config.maxTokens,
+    };
 
     // Create abort controller for timeout
     const controller = new AbortController();
@@ -433,7 +351,10 @@ export class LLMClient {
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.config.apiKey}`,
+        },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -456,81 +377,18 @@ export class LLMClient {
 
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
-          throw new LLMError(
-            'Request timed out',
-            'TIMEOUT',
-            this.config.provider,
-            true
-          );
+          throw new LLMError('Request timed out', 'TIMEOUT', true);
         }
 
         throw new LLMError(
           `Network error: ${error.message}`,
           'NETWORK_ERROR',
-          this.config.provider,
           true
         );
       }
 
-      throw new LLMError(
-        'Unknown error',
-        'UNKNOWN',
-        this.config.provider,
-        false
-      );
+      throw new LLMError('Unknown error', 'UNKNOWN', false);
     }
-  }
-
-  /**
-   * Build request body for the provider
-   */
-  private buildRequestBody(
-    messages: ChatMessage[]
-  ): Record<string, unknown> {
-    if (this.config.provider === 'anthropic') {
-      // Anthropic has a different format
-      const systemMessages = messages.filter((m) => m.role === 'system');
-      const otherMessages = messages.filter((m) => m.role !== 'system');
-
-      return {
-        model: this.config.model,
-        max_tokens: this.config.maxTokens,
-        system:
-          systemMessages.length > 0
-            ? systemMessages.map((m) => m.content).join('\n')
-            : undefined,
-        messages: otherMessages.map((m) => ({
-          role: m.role === 'assistant' ? 'assistant' : 'user',
-          content: m.content,
-        })),
-      };
-    }
-
-    // OpenAI-compatible format (ARIA Tasks, Kimi, OpenAI)
-    return {
-      model: this.config.model,
-      messages,
-      temperature: this.config.temperature,
-      max_tokens: this.config.maxTokens,
-    };
-  }
-
-  /**
-   * Get headers for the request
-   */
-  private getHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-
-    if (this.config.provider === 'anthropic') {
-      headers['x-api-key'] = this.config.apiKey;
-      headers['anthropic-version'] = '2023-06-01';
-    } else {
-      headers['Authorization'] = `Bearer ${this.config.apiKey}`;
-    }
-
-    return headers;
   }
 
   /**
@@ -566,12 +424,7 @@ export class LLMClient {
         break;
     }
 
-    return new LLMError(
-      `API error (${status}): ${body}`,
-      code,
-      this.config.provider,
-      retryable
-    );
+    return new LLMError(`API error (${status}): ${body}`, code, retryable);
   }
 
   /**
@@ -583,26 +436,7 @@ export class LLMClient {
   ): ChatResponse {
     const latencyMs = Date.now() - startTime;
 
-    if (this.config.provider === 'anthropic') {
-      // Anthropic response format
-      const contentArr = data['content'] as Array<{ text: string }> | undefined;
-      const content = contentArr?.[0]?.text || '';
-      const usage = data['usage'] as { input_tokens: number; output_tokens: number } | undefined;
-      const inputTokens = usage?.input_tokens || 0;
-      const outputTokens = usage?.output_tokens || 0;
-
-      return {
-        content,
-        inputTokens,
-        outputTokens,
-        cost: this.calculateCost(inputTokens, outputTokens),
-        latencyMs,
-        provider: this.config.provider,
-        model: this.config.model,
-      };
-    }
-
-    // OpenAI-compatible format (Kimi, OpenAI)
+    // OpenAI-compatible format
     const choices = data['choices'] as Array<{
       message: { content: string };
     }> | undefined;
@@ -620,7 +454,6 @@ export class LLMClient {
       outputTokens,
       cost: this.calculateCost(inputTokens, outputTokens),
       latencyMs,
-      provider: this.config.provider,
       model: this.config.model,
     };
   }
@@ -629,9 +462,8 @@ export class LLMClient {
    * Calculate cost for tokens
    */
   private calculateCost(inputTokens: number, outputTokens: number): number {
-    const costs = TOKEN_COSTS[this.config.provider];
-    const inputCost = (inputTokens / 1000) * costs.input;
-    const outputCost = (outputTokens / 1000) * costs.output;
+    const inputCost = (inputTokens / 1000) * TOKEN_COSTS.input;
+    const outputCost = (outputTokens / 1000) * TOKEN_COSTS.output;
     return inputCost + outputCost;
   }
 }
@@ -641,66 +473,65 @@ export class LLMClient {
 // ============================================================================
 
 /**
- * Create an LLM client from config
- */
-export function createLLMClient(config: Partial<LLMConfig> & { apiKey: string }): LLMClient {
-  return new LLMClient(config);
-}
-
-/**
- * Create an ARIA Tasks client (Azure-hosted Kimi)
+ * Create an ARIA Tasks LLM client
  *
- * This is the primary provider for Hawky code review.
- * Uses AZURE_AI_FOUNDRY_ENDPOINT (GitHub Actions) or ARIA_TASKS_ENDPOINT (local dev).
+ * Uses environment variables:
+ * - AZURE_AI_FOUNDRY_ENDPOINT (or ARIA_TASKS_ENDPOINT for local dev)
+ * - AZURE_AI_FOUNDRY_KEY (or ARIA_TASKS_API_KEY for local dev)
  */
-export function createAriaTasksClient(
-  apiKey: string,
-  endpoint?: string,
-  config?: Partial<LLMConfig>
-): LLMClient {
-  return new LLMClient({
-    ...config,
-    provider: 'aria-tasks',
-    apiKey,
-    endpoint: endpoint ||
-              process.env['AZURE_AI_FOUNDRY_ENDPOINT'] ||
-              process.env['ARIA_TASKS_ENDPOINT'],
-  });
-}
+export function createLLMClient(config?: {
+  apiKey?: string;
+  endpoint?: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+  trackCost?: boolean;
+  rateLimit?: number;
+}): LLMClient {
+  const apiKey = config?.apiKey ||
+                 process.env['AZURE_AI_FOUNDRY_KEY'] ||
+                 process.env['ARIA_TASKS_API_KEY'];
 
-/**
- * Create a Kimi client (public Moonshot API)
- *
- * Fallback when ARIA Tasks is not available.
- */
-export function createKimiClient(apiKey: string, config?: Partial<LLMConfig>): LLMClient {
-  return new LLMClient({
-    ...config,
-    provider: 'kimi',
-    apiKey,
-  });
-}
+  const endpoint = config?.endpoint ||
+                   process.env['AZURE_AI_FOUNDRY_ENDPOINT'] ||
+                   process.env['ARIA_TASKS_ENDPOINT'];
 
-/**
- * Create an OpenAI client
- */
-export function createOpenAIClient(apiKey: string, config?: Partial<LLMConfig>): LLMClient {
-  return new LLMClient({
-    ...config,
-    provider: 'openai',
-    apiKey,
-  });
-}
+  if (!apiKey) {
+    throw new LLMError(
+      'Missing API key. Set AZURE_AI_FOUNDRY_KEY environment variable.',
+      'MISSING_CONFIG',
+      false
+    );
+  }
 
-/**
- * Create an Anthropic client
- */
-export function createAnthropicClient(apiKey: string, config?: Partial<LLMConfig>): LLMClient {
-  return new LLMClient({
-    ...config,
-    provider: 'anthropic',
-    apiKey,
-  });
+  if (!endpoint) {
+    throw new LLMError(
+      'Missing endpoint. Set AZURE_AI_FOUNDRY_ENDPOINT environment variable.',
+      'MISSING_CONFIG',
+      false
+    );
+  }
+
+  const clientConfig: {
+    apiKey: string;
+    endpoint: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    timeoutMs?: number;
+    trackCost?: boolean;
+    rateLimit?: number;
+  } = { apiKey, endpoint };
+
+  if (config?.model !== undefined) clientConfig.model = config.model;
+  if (config?.temperature !== undefined) clientConfig.temperature = config.temperature;
+  if (config?.maxTokens !== undefined) clientConfig.maxTokens = config.maxTokens;
+  if (config?.timeoutMs !== undefined) clientConfig.timeoutMs = config.timeoutMs;
+  if (config?.trackCost !== undefined) clientConfig.trackCost = config.trackCost;
+  if (config?.rateLimit !== undefined) clientConfig.rateLimit = config.rateLimit;
+
+  return new LLMClient(clientConfig);
 }
 
 // ============================================================================
@@ -708,12 +539,13 @@ export function createAnthropicClient(apiKey: string, config?: Partial<LLMConfig
 // ============================================================================
 
 /**
- * Load LLM config from environment and .hawky.yml
+ * Load LLM config from environment
+ *
+ * Returns null if credentials are not available (LLM review will be skipped).
  */
 export function loadLLMConfig(
   hawkyConfig?: {
     llm?: {
-      provider?: LLMProvider;
       api_key?: string;
       endpoint?: string;
       model?: string;
@@ -724,35 +556,19 @@ export function loadLLMConfig(
   }
 ): LLMConfig | null {
   const llmConfig = hawkyConfig?.llm;
-  // Default to aria-tasks (Azure-hosted Kimi)
-  const provider = llmConfig?.provider || 'aria-tasks';
 
   // Get API key from config or environment
   let apiKey = llmConfig?.api_key;
   let endpoint = llmConfig?.endpoint;
 
   if (!apiKey) {
-    // Try environment variables based on provider
-    switch (provider) {
-      case 'aria-tasks':
-        // Primary: GitHub secrets (AZURE_AI_FOUNDRY_*)
-        // Fallback: ARIA_TASKS_* for local dev
-        apiKey = process.env['AZURE_AI_FOUNDRY_KEY'] ||
-                 process.env['ARIA_TASKS_API_KEY'];
-        endpoint = endpoint ||
-                   process.env['AZURE_AI_FOUNDRY_ENDPOINT'] ||
-                   process.env['ARIA_TASKS_ENDPOINT'];
-        break;
-      case 'kimi':
-        apiKey = process.env['KIMI_API_KEY'] || process.env['MOONSHOT_API_KEY'];
-        break;
-      case 'openai':
-        apiKey = process.env['OPENAI_API_KEY'];
-        break;
-      case 'anthropic':
-        apiKey = process.env['ANTHROPIC_API_KEY'];
-        break;
-    }
+    apiKey = process.env['AZURE_AI_FOUNDRY_KEY'] ||
+             process.env['ARIA_TASKS_API_KEY'];
+  }
+
+  if (!endpoint) {
+    endpoint = process.env['AZURE_AI_FOUNDRY_ENDPOINT'] ||
+               process.env['ARIA_TASKS_ENDPOINT'];
   }
 
   // Handle ${VAR} syntax for API key
@@ -767,22 +583,18 @@ export function loadLLMConfig(
     endpoint = process.env[varName];
   }
 
-  if (!apiKey) {
+  // If no credentials, return null (LLM review will be skipped)
+  if (!apiKey || !endpoint) {
     return null;
   }
 
-  const defaults = DEFAULT_CONFIGS[provider];
-  const maxTokens = llmConfig?.max_tokens ?? defaults.maxTokens ?? 4096;
-  const rateLimit = defaults.rateLimit ?? 60;
-
   return {
-    provider,
     apiKey,
     endpoint,
-    model: llmConfig?.model || defaults.model || 'kimi-2.5',
-    temperature: llmConfig?.temperature ?? defaults.temperature ?? 0.3,
-    maxTokens,
+    model: llmConfig?.model ?? DEFAULT_CONFIG.model,
+    temperature: llmConfig?.temperature ?? DEFAULT_CONFIG.temperature,
+    maxTokens: llmConfig?.max_tokens ?? DEFAULT_CONFIG.maxTokens,
     timeoutMs: (llmConfig?.timeout ?? 60) * 1000,
-    rateLimit,
+    rateLimit: DEFAULT_CONFIG.rateLimit,
   };
 }

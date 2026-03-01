@@ -10,7 +10,7 @@ import {
   type ReviewIssue,
   type LLMReviewResult,
 } from '../../src/llm/review';
-import { LLMClient, createKimiClient } from '../../src/llm/provider';
+import { LLMClient } from '../../src/llm/provider';
 import type { ReviewContext, PRDiff } from '../../src/llm/context';
 
 describe('Semantic Review Engine', () => {
@@ -198,7 +198,7 @@ describe('Semantic Review Engine', () => {
         }),
       } as Response);
 
-      mockClient = createKimiClient('test-key');
+      mockClient = new LLMClient({ apiKey: 'test-key', endpoint: 'https://test.openai.azure.com' });
       const context = createMockContext();
 
       const result = await runReview({
@@ -240,7 +240,7 @@ describe('Semantic Review Engine', () => {
         }),
       } as Response);
 
-      mockClient = createKimiClient('test-key');
+      mockClient = new LLMClient({ apiKey: 'test-key', endpoint: 'https://test.openai.azure.com' });
       const context = createMockContext();
 
       const result = await runReview({
@@ -267,7 +267,7 @@ describe('Semantic Review Engine', () => {
         }),
       } as Response);
 
-      mockClient = createKimiClient('test-key');
+      mockClient = new LLMClient({ apiKey: 'test-key', endpoint: 'https://test.openai.azure.com' });
       const context = createMockContext();
 
       const result = await runReview({

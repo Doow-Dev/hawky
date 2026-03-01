@@ -1,12 +1,8 @@
 /**
  * LLM Provider Integration
  *
- * Multi-provider LLM client with ARIA Tasks (Azure-hosted Kimi) as primary.
- * Supports OpenAI and Anthropic as fallbacks.
- *
- * ARIA Tasks is the Azure AI Foundry-hosted Kimi deployment used for
- * automated tasks like code review. It uses the OpenAI-compatible API
- * with Azure authentication.
+ * ARIA Tasks client for Hawky code review.
+ * Uses Azure AI Foundry-hosted Kimi (kimi-2.5) for semantic code review.
  *
  * Features:
  * - Rate limiting with token bucket
@@ -15,15 +11,6 @@
  * - Cost tracking (optional)
  */
 /**
- * Supported LLM providers
- *
- * - aria-tasks: Azure-hosted Kimi (ARIA Tasks) - primary provider
- * - kimi: Public Moonshot API (fallback)
- * - openai: OpenAI API
- * - anthropic: Anthropic API
- */
-export type LLMProvider = 'aria-tasks' | 'kimi' | 'openai' | 'anthropic';
-/**
  * Chat message format (OpenAI-compatible)
  */
 export interface ChatMessage {
@@ -31,39 +18,37 @@ export interface ChatMessage {
     content: string;
 }
 /**
- * LLM configuration from .hawky.yml
+ * LLM configuration
  */
 export interface LLMConfig {
-    /** Provider to use */
-    provider: LLMProvider;
-    /** API key (usually from environment variable) */
+    /** API key (from AZURE_AI_FOUNDRY_KEY) */
     apiKey: string;
-    /** Custom endpoint URL (required for aria-tasks, optional for others) */
-    endpoint?: string | undefined;
-    /** Model name */
+    /** Azure AI Foundry endpoint URL */
+    endpoint: string;
+    /** Model name (default: kimi-2.5) */
     model: string;
     /** Temperature (0-1, lower = more deterministic) */
     temperature: number;
     /** Maximum tokens in response */
-    maxTokens?: number;
+    maxTokens: number;
     /** Timeout in milliseconds */
     timeoutMs: number;
     /** Enable cost tracking */
     trackCost?: boolean;
     /** Rate limit: max requests per minute */
-    rateLimit?: number;
+    rateLimit: number;
 }
 /**
- * Default configurations per provider
+ * Default configuration for ARIA Tasks
  */
-export declare const DEFAULT_CONFIGS: Record<LLMProvider, Partial<LLMConfig>>;
+export declare const DEFAULT_CONFIG: Omit<LLMConfig, 'apiKey' | 'endpoint'>;
 /**
  * Cost per 1K tokens (approximate, in USD)
  */
-export declare const TOKEN_COSTS: Record<LLMProvider, {
+export declare const TOKEN_COSTS: {
     input: number;
     output: number;
-}>;
+};
 /**
  * Response from chat completion
  */
@@ -78,8 +63,6 @@ export interface ChatResponse {
     cost: number;
     /** Response latency in ms */
     latencyMs: number;
-    /** Provider used */
-    provider: LLMProvider;
     /** Model used */
     model: string;
 }
@@ -88,14 +71,13 @@ export interface ChatResponse {
  */
 export declare class LLMError extends Error {
     readonly code: LLMErrorCode;
-    readonly provider: LLMProvider;
     readonly retryable: boolean;
-    constructor(message: string, code: LLMErrorCode, provider: LLMProvider, retryable?: boolean);
+    constructor(message: string, code: LLMErrorCode, retryable?: boolean);
 }
 /**
  * Error codes
  */
-export type LLMErrorCode = 'RATE_LIMITED' | 'TIMEOUT' | 'INVALID_API_KEY' | 'QUOTA_EXCEEDED' | 'MODEL_NOT_FOUND' | 'INVALID_REQUEST' | 'SERVER_ERROR' | 'NETWORK_ERROR' | 'UNKNOWN';
+export type LLMErrorCode = 'RATE_LIMITED' | 'TIMEOUT' | 'INVALID_API_KEY' | 'QUOTA_EXCEEDED' | 'MODEL_NOT_FOUND' | 'INVALID_REQUEST' | 'SERVER_ERROR' | 'NETWORK_ERROR' | 'MISSING_CONFIG' | 'UNKNOWN';
 /**
  * Tracks LLM usage and costs
  */
@@ -117,7 +99,6 @@ export declare class CostTracker {
         totalTokens: number;
         totalCost: number;
         requestCount: number;
-        averageLatencyMs: number;
     };
     /**
      * Reset tracking
@@ -125,14 +106,23 @@ export declare class CostTracker {
     reset(): void;
 }
 /**
- * LLM Client with multi-provider support
+ * ARIA Tasks LLM Client
+ *
+ * Connects to Azure AI Foundry-hosted Kimi for semantic code review.
  */
 export declare class LLMClient {
     private readonly config;
     private readonly rateLimiter;
     private readonly costTracker;
-    constructor(config: Partial<LLMConfig> & {
+    constructor(config: {
         apiKey: string;
+        endpoint: string;
+        model?: string;
+        temperature?: number;
+        maxTokens?: number;
+        timeoutMs?: number;
+        trackCost?: boolean;
+        rateLimit?: number;
     });
     /**
      * Get the cost tracker
@@ -150,14 +140,6 @@ export declare class LLMClient {
      */
     private makeRequest;
     /**
-     * Build request body for the provider
-     */
-    private buildRequestBody;
-    /**
-     * Get headers for the request
-     */
-    private getHeaders;
-    /**
      * Parse error response
      */
     private parseErrorResponse;
@@ -171,38 +153,29 @@ export declare class LLMClient {
     private calculateCost;
 }
 /**
- * Create an LLM client from config
+ * Create an ARIA Tasks LLM client
+ *
+ * Uses environment variables:
+ * - AZURE_AI_FOUNDRY_ENDPOINT (or ARIA_TASKS_ENDPOINT for local dev)
+ * - AZURE_AI_FOUNDRY_KEY (or ARIA_TASKS_API_KEY for local dev)
  */
-export declare function createLLMClient(config: Partial<LLMConfig> & {
-    apiKey: string;
+export declare function createLLMClient(config?: {
+    apiKey?: string;
+    endpoint?: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    timeoutMs?: number;
+    trackCost?: boolean;
+    rateLimit?: number;
 }): LLMClient;
 /**
- * Create an ARIA Tasks client (Azure-hosted Kimi)
+ * Load LLM config from environment
  *
- * This is the primary provider for Hawky code review.
- * Uses AZURE_AI_FOUNDRY_ENDPOINT (GitHub Actions) or ARIA_TASKS_ENDPOINT (local dev).
- */
-export declare function createAriaTasksClient(apiKey: string, endpoint?: string, config?: Partial<LLMConfig>): LLMClient;
-/**
- * Create a Kimi client (public Moonshot API)
- *
- * Fallback when ARIA Tasks is not available.
- */
-export declare function createKimiClient(apiKey: string, config?: Partial<LLMConfig>): LLMClient;
-/**
- * Create an OpenAI client
- */
-export declare function createOpenAIClient(apiKey: string, config?: Partial<LLMConfig>): LLMClient;
-/**
- * Create an Anthropic client
- */
-export declare function createAnthropicClient(apiKey: string, config?: Partial<LLMConfig>): LLMClient;
-/**
- * Load LLM config from environment and .hawky.yml
+ * Returns null if credentials are not available (LLM review will be skipped).
  */
 export declare function loadLLMConfig(hawkyConfig?: {
     llm?: {
-        provider?: LLMProvider;
         api_key?: string;
         endpoint?: string;
         model?: string;

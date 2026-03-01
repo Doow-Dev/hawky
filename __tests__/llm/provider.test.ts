@@ -1,24 +1,20 @@
 /**
- * Tests for LLM Provider Integration
+ * Tests for LLM Provider Integration (ARIA Tasks only)
  */
 
 import {
   LLMClient,
   CostTracker,
   createLLMClient,
-  createAriaTasksClient,
-  createKimiClient,
-  createOpenAIClient,
-  createAnthropicClient,
   loadLLMConfig,
-  DEFAULT_CONFIGS,
+  DEFAULT_CONFIG,
   TOKEN_COSTS,
   LLMError,
   type ChatMessage,
   type LLMConfig,
 } from '../../src/llm/provider';
 
-describe('LLM Provider', () => {
+describe('LLM Provider (ARIA Tasks)', () => {
   // ============================================================================
   // CostTracker
   // ============================================================================
@@ -33,8 +29,7 @@ describe('LLM Provider', () => {
         outputTokens: 50,
         cost: 0.003,
         latencyMs: 500,
-        provider: 'kimi',
-        model: 'moonshot-v1-8k',
+        model: 'kimi-2.5',
       });
 
       tracker.record({
@@ -43,8 +38,7 @@ describe('LLM Provider', () => {
         outputTokens: 100,
         cost: 0.006,
         latencyMs: 600,
-        provider: 'kimi',
-        model: 'moonshot-v1-8k',
+        model: 'kimi-2.5',
       });
 
       const summary = tracker.getSummary();
@@ -65,8 +59,7 @@ describe('LLM Provider', () => {
         outputTokens: 50,
         cost: 0.003,
         latencyMs: 500,
-        provider: 'kimi',
-        model: 'moonshot-v1-8k',
+        model: 'kimi-2.5',
       });
 
       tracker.reset();
@@ -82,17 +75,20 @@ describe('LLM Provider', () => {
   // ============================================================================
 
   describe('LLMClient configuration', () => {
-    it('should use Kimi defaults', () => {
-      const client = createKimiClient('test-key');
-      // Access config through getCostTracker (client internals not exposed)
+    it('should create client with explicit config', () => {
+      const client = new LLMClient({
+        apiKey: 'test-key',
+        endpoint: 'https://test.openai.azure.com',
+      });
+
       expect(client).toBeDefined();
     });
 
     it('should allow custom configuration', () => {
-      const client = createLLMClient({
-        provider: 'kimi',
+      const client = new LLMClient({
         apiKey: 'test-key',
-        model: 'moonshot-v1-32k',
+        endpoint: 'https://test.openai.azure.com',
+        model: 'kimi-2.5-turbo',
         temperature: 0.7,
         maxTokens: 8192,
         timeoutMs: 120000,
@@ -101,36 +97,57 @@ describe('LLM Provider', () => {
       expect(client).toBeDefined();
     });
 
-    it('should create OpenAI client', () => {
-      const client = createOpenAIClient('test-key', {
-        model: 'gpt-4',
-        temperature: 0.5,
-      });
+    it('should use default model kimi-2.5', () => {
+      expect(DEFAULT_CONFIG.model).toBe('kimi-2.5');
+    });
+  });
+
+  // ============================================================================
+  // createLLMClient
+  // ============================================================================
+
+  describe('createLLMClient', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      process.env = { ...originalEnv };
+    });
+
+    afterAll(() => {
+      process.env = originalEnv;
+    });
+
+    it('should throw when no API key available', () => {
+      delete process.env.AZURE_AI_FOUNDRY_KEY;
+      delete process.env.ARIA_TASKS_API_KEY;
+
+      expect(() => createLLMClient()).toThrow(LLMError);
+    });
+
+    it('should throw when no endpoint available', () => {
+      process.env.AZURE_AI_FOUNDRY_KEY = 'test-key';
+      delete process.env.AZURE_AI_FOUNDRY_ENDPOINT;
+      delete process.env.ARIA_TASKS_ENDPOINT;
+
+      expect(() => createLLMClient()).toThrow(LLMError);
+    });
+
+    it('should create client from environment variables', () => {
+      process.env.AZURE_AI_FOUNDRY_KEY = 'azure-key';
+      process.env.AZURE_AI_FOUNDRY_ENDPOINT = 'https://test.openai.azure.com';
+
+      const client = createLLMClient();
 
       expect(client).toBeDefined();
     });
 
-    it('should create Anthropic client', () => {
-      const client = createAnthropicClient('test-key');
+    it('should use ARIA_TASKS_* fallback env vars', () => {
+      delete process.env.AZURE_AI_FOUNDRY_KEY;
+      delete process.env.AZURE_AI_FOUNDRY_ENDPOINT;
+      process.env.ARIA_TASKS_API_KEY = 'aria-key';
+      process.env.ARIA_TASKS_ENDPOINT = 'https://aria.openai.azure.com';
 
-      expect(client).toBeDefined();
-    });
-
-    it('should create ARIA Tasks client (Azure-hosted Kimi)', () => {
-      const client = createAriaTasksClient(
-        'test-key',
-        'https://test.openai.azure.com'
-      );
-
-      expect(client).toBeDefined();
-    });
-
-    it('should default to aria-tasks provider', () => {
-      // aria-tasks is the primary provider for Hawky
-      const client = createLLMClient({
-        apiKey: 'test-key',
-        endpoint: 'https://test.openai.azure.com',
-      });
+      const client = createLLMClient();
 
       expect(client).toBeDefined();
     });
@@ -151,9 +168,11 @@ describe('LLM Provider', () => {
       process.env = originalEnv;
     });
 
-    it('should return null when no API key available', () => {
-      delete process.env.KIMI_API_KEY;
-      delete process.env.MOONSHOT_API_KEY;
+    it('should return null when no credentials available', () => {
+      delete process.env.AZURE_AI_FOUNDRY_KEY;
+      delete process.env.AZURE_AI_FOUNDRY_ENDPOINT;
+      delete process.env.ARIA_TASKS_API_KEY;
+      delete process.env.ARIA_TASKS_ENDPOINT;
 
       const config = loadLLMConfig({});
 
@@ -163,128 +182,82 @@ describe('LLM Provider', () => {
     it('should load config from hawky.yml', () => {
       const config = loadLLMConfig({
         llm: {
-          provider: 'kimi',
           api_key: 'direct-key',
-          model: 'moonshot-v1-32k',
+          endpoint: 'https://test.openai.azure.com',
+          model: 'kimi-2.5-turbo',
           temperature: 0.5,
         },
       });
 
       expect(config).not.toBeNull();
-      expect(config?.provider).toBe('kimi');
       expect(config?.apiKey).toBe('direct-key');
-      expect(config?.model).toBe('moonshot-v1-32k');
+      expect(config?.endpoint).toBe('https://test.openai.azure.com');
+      expect(config?.model).toBe('kimi-2.5-turbo');
       expect(config?.temperature).toBe(0.5);
     });
 
-    it('should load API key from environment variable', () => {
-      process.env.KIMI_API_KEY = 'env-key';
-
-      const config = loadLLMConfig({
-        llm: {
-          provider: 'kimi',
-        },
-      });
-
-      expect(config).not.toBeNull();
-      expect(config?.apiKey).toBe('env-key');
-    });
-
-    it('should expand ${VAR} syntax', () => {
-      process.env.MY_API_KEY = 'expanded-key';
-
-      const config = loadLLMConfig({
-        llm: {
-          provider: 'kimi',
-          api_key: '${MY_API_KEY}',
-        },
-      });
-
-      expect(config).not.toBeNull();
-      expect(config?.apiKey).toBe('expanded-key');
-    });
-
-    it('should use provider-specific environment variables', () => {
-      process.env.OPENAI_API_KEY = 'openai-key';
-
-      const config = loadLLMConfig({
-        llm: {
-          provider: 'openai',
-        },
-      });
-
-      expect(config).not.toBeNull();
-      expect(config?.apiKey).toBe('openai-key');
-    });
-
-    it('should use default config values', () => {
-      const config = loadLLMConfig({
-        llm: {
-          provider: 'kimi',
-          api_key: 'test-key',
-        },
-      });
-
-      expect(config).not.toBeNull();
-      expect(config?.model).toBe(DEFAULT_CONFIGS.kimi.model);
-      expect(config?.temperature).toBe(DEFAULT_CONFIGS.kimi.temperature);
-    });
-
-    it('should load ARIA Tasks config from AZURE_AI_FOUNDRY_* env vars', () => {
-      process.env.AZURE_AI_FOUNDRY_KEY = 'azure-key';
-      process.env.AZURE_AI_FOUNDRY_ENDPOINT = 'https://test.openai.azure.com';
-
-      const config = loadLLMConfig({
-        llm: {
-          provider: 'aria-tasks',
-        },
-      });
-
-      expect(config).not.toBeNull();
-      expect(config?.provider).toBe('aria-tasks');
-      expect(config?.apiKey).toBe('azure-key');
-      expect(config?.endpoint).toBe('https://test.openai.azure.com');
-      expect(config?.model).toBe('kimi-2.5');
-    });
-
-    it('should default to aria-tasks provider when no provider specified', () => {
+    it('should load from AZURE_AI_FOUNDRY_* env vars', () => {
       process.env.AZURE_AI_FOUNDRY_KEY = 'azure-key';
       process.env.AZURE_AI_FOUNDRY_ENDPOINT = 'https://test.openai.azure.com';
 
       const config = loadLLMConfig({});
 
       expect(config).not.toBeNull();
-      expect(config?.provider).toBe('aria-tasks');
+      expect(config?.apiKey).toBe('azure-key');
+      expect(config?.endpoint).toBe('https://test.openai.azure.com');
+      expect(config?.model).toBe('kimi-2.5');
+    });
+
+    it('should expand ${VAR} syntax', () => {
+      process.env.MY_API_KEY = 'expanded-key';
+      process.env.MY_ENDPOINT = 'https://expanded.openai.azure.com';
+
+      const config = loadLLMConfig({
+        llm: {
+          api_key: '${MY_API_KEY}',
+          endpoint: '${MY_ENDPOINT}',
+        },
+      });
+
+      expect(config).not.toBeNull();
+      expect(config?.apiKey).toBe('expanded-key');
+      expect(config?.endpoint).toBe('https://expanded.openai.azure.com');
+    });
+
+    it('should use default config values', () => {
+      const config = loadLLMConfig({
+        llm: {
+          api_key: 'test-key',
+          endpoint: 'https://test.openai.azure.com',
+        },
+      });
+
+      expect(config).not.toBeNull();
+      expect(config?.model).toBe(DEFAULT_CONFIG.model);
+      expect(config?.temperature).toBe(DEFAULT_CONFIG.temperature);
+      expect(config?.maxTokens).toBe(DEFAULT_CONFIG.maxTokens);
     });
   });
 
   // ============================================================================
-  // DEFAULT_CONFIGS and TOKEN_COSTS
+  // Constants
   // ============================================================================
 
   describe('Constants', () => {
-    it('should have configs for all providers', () => {
-      expect(DEFAULT_CONFIGS['aria-tasks']).toBeDefined();
-      expect(DEFAULT_CONFIGS.kimi).toBeDefined();
-      expect(DEFAULT_CONFIGS.openai).toBeDefined();
-      expect(DEFAULT_CONFIGS.anthropic).toBeDefined();
+    it('should have kimi-2.5 as default model', () => {
+      expect(DEFAULT_CONFIG.model).toBe('kimi-2.5');
     });
 
-    it('should have kimi-2.5 as default model for aria-tasks', () => {
-      expect(DEFAULT_CONFIGS['aria-tasks'].model).toBe('kimi-2.5');
+    it('should have token costs defined', () => {
+      expect(TOKEN_COSTS.input).toBeGreaterThan(0);
+      expect(TOKEN_COSTS.output).toBeGreaterThan(0);
     });
 
-    it('should have token costs for all providers', () => {
-      expect(TOKEN_COSTS['aria-tasks']).toBeDefined();
-      expect(TOKEN_COSTS.kimi).toBeDefined();
-      expect(TOKEN_COSTS.openai).toBeDefined();
-      expect(TOKEN_COSTS.anthropic).toBeDefined();
-
-      // Each should have input and output costs
-      for (const provider of ['aria-tasks', 'kimi', 'openai', 'anthropic'] as const) {
-        expect(TOKEN_COSTS[provider].input).toBeGreaterThan(0);
-        expect(TOKEN_COSTS[provider].output).toBeGreaterThan(0);
-      }
+    it('should have reasonable defaults', () => {
+      expect(DEFAULT_CONFIG.temperature).toBe(0.3);
+      expect(DEFAULT_CONFIG.maxTokens).toBe(4096);
+      expect(DEFAULT_CONFIG.timeoutMs).toBe(60000);
+      expect(DEFAULT_CONFIG.rateLimit).toBe(60);
     });
   });
 
@@ -294,28 +267,24 @@ describe('LLM Provider', () => {
 
   describe('LLMError', () => {
     it('should create error with correct properties', () => {
-      const error = new LLMError(
-        'Rate limited',
-        'RATE_LIMITED',
-        'kimi',
-        true
-      );
+      const error = new LLMError('Rate limited', 'RATE_LIMITED', true);
 
       expect(error.message).toBe('Rate limited');
       expect(error.code).toBe('RATE_LIMITED');
-      expect(error.provider).toBe('kimi');
       expect(error.retryable).toBe(true);
       expect(error.name).toBe('LLMError');
     });
 
     it('should default retryable to false', () => {
-      const error = new LLMError(
-        'Invalid key',
-        'INVALID_API_KEY',
-        'openai'
-      );
+      const error = new LLMError('Invalid key', 'INVALID_API_KEY');
 
       expect(error.retryable).toBe(false);
+    });
+
+    it('should have MISSING_CONFIG error code', () => {
+      const error = new LLMError('Missing config', 'MISSING_CONFIG');
+
+      expect(error.code).toBe('MISSING_CONFIG');
     });
   });
 
@@ -342,7 +311,7 @@ describe('LLM Provider', () => {
           choices: [
             {
               message: {
-                content: 'Hello, world!',
+                content: 'Hello from Azure Kimi!',
               },
             },
           ],
@@ -353,18 +322,43 @@ describe('LLM Provider', () => {
         }),
       } as Response);
 
-      const client = createKimiClient('test-key');
+      const client = new LLMClient({
+        apiKey: 'test-key',
+        endpoint: 'https://test.openai.azure.com',
+      });
       const messages: ChatMessage[] = [
         { role: 'user', content: 'Say hello' },
       ];
 
       const response = await client.chat(messages);
 
-      expect(response.content).toBe('Hello, world!');
+      expect(response.content).toBe('Hello from Azure Kimi!');
       expect(response.inputTokens).toBe(10);
       expect(response.outputTokens).toBe(5);
-      expect(response.provider).toBe('kimi');
+      expect(response.model).toBe('kimi-2.5');
       expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should call correct endpoint URL', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'OK' } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+      } as Response);
+
+      const client = new LLMClient({
+        apiKey: 'test-key',
+        endpoint: 'https://test.openai.azure.com',
+      });
+
+      await client.chat([{ role: 'user', content: 'Test' }]);
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://test.openai.azure.com/v1/chat/completions',
+        expect.any(Object)
+      );
     });
 
     it('should handle rate limiting with retry', async () => {
@@ -388,7 +382,10 @@ describe('LLM Provider', () => {
         } as Response;
       });
 
-      const client = createKimiClient('test-key');
+      const client = new LLMClient({
+        apiKey: 'test-key',
+        endpoint: 'https://test.openai.azure.com',
+      });
       const messages: ChatMessage[] = [
         { role: 'user', content: 'Test' },
       ];
@@ -408,39 +405,16 @@ describe('LLM Provider', () => {
         text: async () => 'Invalid API key',
       } as Response);
 
-      const client = createKimiClient('invalid-key');
+      const client = new LLMClient({
+        apiKey: 'invalid-key',
+        endpoint: 'https://test.openai.azure.com',
+      });
       const messages: ChatMessage[] = [
         { role: 'user', content: 'Test' },
       ];
 
       await expect(client.chat(messages)).rejects.toThrow(LLMError);
       expect(global.fetch).toHaveBeenCalledTimes(1);
-    });
-
-    it('should handle Anthropic format', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          content: [{ text: 'Hello from Claude' }],
-          usage: {
-            input_tokens: 15,
-            output_tokens: 8,
-          },
-        }),
-      } as Response);
-
-      const client = createAnthropicClient('test-key');
-      const messages: ChatMessage[] = [
-        { role: 'system', content: 'You are helpful' },
-        { role: 'user', content: 'Say hello' },
-      ];
-
-      const response = await client.chat(messages);
-
-      expect(response.content).toBe('Hello from Claude');
-      expect(response.inputTokens).toBe(15);
-      expect(response.outputTokens).toBe(8);
-      expect(response.provider).toBe('anthropic');
     });
 
     it('should track costs when enabled', async () => {
@@ -452,9 +426,9 @@ describe('LLM Provider', () => {
         }),
       } as Response);
 
-      const client = createLLMClient({
-        provider: 'kimi',
+      const client = new LLMClient({
         apiKey: 'test-key',
+        endpoint: 'https://test.openai.azure.com',
         trackCost: true,
       });
 
@@ -466,30 +440,29 @@ describe('LLM Provider', () => {
       expect(summary.totalCost).toBeGreaterThan(0);
     });
 
-    it('should make request to ARIA Tasks endpoint', async () => {
+    it('should include Authorization header', async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          choices: [{ message: { content: 'Hello from Azure Kimi!' } }],
+          choices: [{ message: { content: 'OK' } }],
           usage: { prompt_tokens: 10, completion_tokens: 5 },
         }),
       } as Response);
 
-      const client = createAriaTasksClient(
-        'azure-key',
-        'https://test.openai.azure.com'
-      );
-      const messages: ChatMessage[] = [
-        { role: 'user', content: 'Say hello' },
-      ];
+      const client = new LLMClient({
+        apiKey: 'my-secret-key',
+        endpoint: 'https://test.openai.azure.com',
+      });
 
-      const response = await client.chat(messages);
+      await client.chat([{ role: 'user', content: 'Test' }]);
 
-      expect(response.content).toBe('Hello from Azure Kimi!');
-      expect(response.provider).toBe('aria-tasks');
       expect(global.fetch).toHaveBeenCalledWith(
-        'https://test.openai.azure.com/v1/chat/completions',
-        expect.any(Object)
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'Authorization': 'Bearer my-secret-key',
+          }),
+        })
       );
     });
   });

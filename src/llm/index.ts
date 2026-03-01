@@ -1,14 +1,12 @@
 /**
  * LLM Module
  *
- * AI-powered code review using LLMs.
- * Primary provider: ARIA Tasks (Azure-hosted Kimi via Azure AI Foundry)
- * Fallbacks: Kimi (public API), OpenAI, Anthropic
+ * ARIA Tasks integration for semantic code review.
+ * Uses Azure AI Foundry-hosted Kimi (kimi-2.5).
  */
 
 export {
   // Types
-  type LLMProvider,
   type ChatMessage,
   type LLMConfig,
   type ChatResponse,
@@ -17,15 +15,11 @@ export {
   LLMClient,
   LLMError,
   CostTracker,
-  // Factory functions
+  // Factory function
   createLLMClient,
-  createAriaTasksClient,
-  createKimiClient,
-  createOpenAIClient,
-  createAnthropicClient,
   // Config
   loadLLMConfig,
-  DEFAULT_CONFIGS,
+  DEFAULT_CONFIG,
   TOKEN_COSTS,
 } from './provider';
 
