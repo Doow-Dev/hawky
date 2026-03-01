@@ -107,3 +107,20 @@ export {
   generateAutoFixes,
   formatAutoFixesAsMarkdown,
 } from './auto-fix';
+
+export {
+  // Types
+  type ConfidenceThresholds,
+  type ScoredIssue,
+  type ScoredReview,
+  type LLMConfidenceConfig,
+  // Constants
+  DEFAULT_CONFIDENCE_THRESHOLDS,
+  // Functions
+  parseConfidenceConfig,
+  deriveIssueConfidence,
+  scoreIssue,
+  scoreReview,
+  formatConfidenceLabel,
+  formatConfidenceNote,
+} from './confidence';
