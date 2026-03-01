@@ -50,3 +50,25 @@ export {
   formatFreshnessReport,
   getFreshnessStatus,
 } from './spec-freshness';
+
+export {
+  // Types
+  type NormalizedType,
+  type NormalizedProperty,
+  type DiffKind,
+  type SchemaDiff,
+  type ExtractedHandler,
+  type ContractViolation,
+  type DifferResult,
+  type DifferOptions,
+  // Functions
+  normalizeOpenApiSchema,
+  normalizeTypeScriptType,
+  extractHandlers,
+  compareTypes,
+  typeToString,
+  matchHandlersToEndpoints,
+  findHandlerFiles,
+  runDiffer,
+  formatDifferReport,
+} from './response-differ';
