@@ -60,3 +60,15 @@ export {
   formatReviewAsMarkdown,
   reviewIssuesToViolations,
 } from './review';
+
+export {
+  // Types
+  type SpecRequirement,
+  type RequirementCheckResult,
+  type SpecComplianceResult,
+  type SpecComplianceOptions,
+  // Functions
+  analyzeSpecCompliance,
+  parseAcceptanceCriteria,
+  formatComplianceAsMarkdown,
+} from './spec-compliance';
