@@ -143,3 +143,21 @@ export {
   enforceDependencies,
   formatDependencyBlock,
 } from './dependency-enforcement';
+
+export {
+  // Types
+  type FrontendPR,
+  type ContractDivergenceResult,
+  type ContractDivergenceOptions,
+  type ContractDivergenceOctokitLike,
+  // Constants
+  API_CONTRACT_PATTERNS,
+  FRONTEND_BRANCH_PATTERNS,
+  // Functions
+  isApiContractFile,
+  filterApiContractFiles,
+  isFrontendBranch,
+  detectSuppression,
+  detectContractDivergence,
+  formatContractDivergenceBlock,
+} from './api-contract-divergence';
