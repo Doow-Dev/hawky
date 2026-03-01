@@ -72,3 +72,14 @@ export {
   runDiffer,
   formatDifferReport,
 } from './response-differ';
+
+export {
+  // Types
+  type TestGeneratorOptions,
+  type GeneratedTestFile,
+  type TestGeneratorResult,
+  // Functions
+  generateTests,
+  generateAndWriteTests,
+  formatTestGeneratorReport,
+} from './test-generator';
