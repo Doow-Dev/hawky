@@ -67,3 +67,18 @@ export {
   detectMixedAuthorship,
   formatAuthorshipAttribution,
 } from './authorship-attribution';
+
+export {
+  // Types
+  type MigrationPR,
+  type SchemaMigrationResult,
+  type SchemaMigrationOptions,
+  type SchemaMigrationOctokitLike,
+  // Constants
+  DEFAULT_MIGRATION_PATTERNS,
+  // Functions
+  isMigrationFile,
+  filterMigrationFiles,
+  detectParallelMigrations,
+  formatSchemaMigrationBlock,
+} from './schema-migration';
