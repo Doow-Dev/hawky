@@ -10,4 +10,5 @@ export { semgrepGate, parseSemgrepOutput, parseSemgrepOutputWithSeverity, getCha
 export { gitleaksGate, parseGitleaksOutput, getChangedFiles as gitleaksGetChangedFiles, violationToAnnotation as gitleaksViolationToAnnotation, } from './gitleaks';
 export { npmAuditGate, parseNpmAuditOutput, violationToAnnotation as npmAuditViolationToAnnotation, } from './npm-audit';
 export { designSystemGate, scanForBannedClasses, scanForHardcodedColors, scanForSpacingViolations, scanForFontSizeViolations, violationToAnnotation as designSystemViolationToAnnotation, } from './design-system';
+export { frontendChecksGate, scanForUnhandledAsyncState, scanForMissingKeys, scanForMissingDependencies, violationToAnnotation as frontendChecksViolationToAnnotation, } from './frontend-checks';
 //# sourceMappingURL=index.d.ts.map
