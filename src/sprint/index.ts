@@ -21,3 +21,17 @@ export {
   validateStoryId,
   formatStoryValidationFinding,
 } from './story-id-validation';
+
+export {
+  // Types
+  type LabelRule,
+  type MatchedLabel,
+  type AutoLabelResult,
+  type AutoLabelOptions,
+  // Constants
+  DEFAULT_LABEL_RULES,
+  // Functions
+  fileMatchesRule,
+  findTriggerFiles,
+  computeAutoLabels,
+} from './auto-label';
