@@ -36108,7 +36108,7 @@ function createMatcher(baseline) {
  * Matches Sprint 1 behavior from hawky.yml env section.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.DEFAULT_CONFIG = exports.COORDINATION_DEFAULTS = exports.VISUAL_DEFAULTS = exports.GRACE_PERIOD_DEFAULTS = exports.GATE_DEFAULTS = exports.LLM_REVIEW_GATE_DEFAULTS = exports.VISUAL_GATE_DEFAULTS = exports.FRONTEND_CHECKS_GATE_DEFAULTS = exports.DESIGN_SYSTEM_GATE_DEFAULTS = exports.NPM_AUDIT_GATE_DEFAULTS = exports.GITLEAKS_GATE_DEFAULTS = exports.SEMGREP_GATE_DEFAULTS = exports.ESLINT_GATE_DEFAULTS = exports.TEST_GATE_DEFAULTS = exports.BUILD_GATE_DEFAULTS = exports.TYPESCRIPT_GATE_DEFAULTS = void 0;
+exports.DEFAULT_CONFIG = exports.COORDINATION_DEFAULTS = exports.VISUAL_DEFAULTS = exports.GRACE_PERIOD_DEFAULTS = exports.GATE_DEFAULTS = exports.BACKEND_CHECKS_GATE_DEFAULTS = exports.LLM_REVIEW_GATE_DEFAULTS = exports.VISUAL_GATE_DEFAULTS = exports.FRONTEND_CHECKS_GATE_DEFAULTS = exports.DESIGN_SYSTEM_GATE_DEFAULTS = exports.NPM_AUDIT_GATE_DEFAULTS = exports.GITLEAKS_GATE_DEFAULTS = exports.SEMGREP_GATE_DEFAULTS = exports.ESLINT_GATE_DEFAULTS = exports.TEST_GATE_DEFAULTS = exports.BUILD_GATE_DEFAULTS = exports.TYPESCRIPT_GATE_DEFAULTS = void 0;
 exports.createDefaultConfig = createDefaultConfig;
 /**
  * Default configuration for the TypeScript gate
@@ -36204,6 +36204,11 @@ exports.LLM_REVIEW_GATE_DEFAULTS = {
 /**
  * Map of gate names to their default configurations
  */
+exports.BACKEND_CHECKS_GATE_DEFAULTS = {
+    enabled: false, // opt-in: only meaningful for NestJS repos
+    blocking: true,
+    timeout: 60,
+};
 exports.GATE_DEFAULTS = {
     typescript: exports.TYPESCRIPT_GATE_DEFAULTS,
     build: exports.BUILD_GATE_DEFAULTS,
@@ -36214,6 +36219,7 @@ exports.GATE_DEFAULTS = {
     'npm-audit': exports.NPM_AUDIT_GATE_DEFAULTS,
     'design-system': exports.DESIGN_SYSTEM_GATE_DEFAULTS,
     'frontend-checks': exports.FRONTEND_CHECKS_GATE_DEFAULTS,
+    'backend-checks': exports.BACKEND_CHECKS_GATE_DEFAULTS,
     visual: exports.VISUAL_GATE_DEFAULTS,
     'llm-review': exports.LLM_REVIEW_GATE_DEFAULTS,
 };
@@ -36287,6 +36293,7 @@ function createDefaultConfig() {
             'npm-audit': { ...exports.NPM_AUDIT_GATE_DEFAULTS },
             'design-system': { ...exports.DESIGN_SYSTEM_GATE_DEFAULTS },
             'frontend-checks': { ...exports.FRONTEND_CHECKS_GATE_DEFAULTS },
+            'backend-checks': { ...exports.BACKEND_CHECKS_GATE_DEFAULTS },
             visual: { ...exports.VISUAL_GATE_DEFAULTS },
             'llm-review': { ...exports.LLM_REVIEW_GATE_DEFAULTS },
         },
@@ -36828,6 +36835,7 @@ exports.GATE_NAMES = [
     'npm-audit',
     'design-system',
     'frontend-checks',
+    'backend-checks',
     'visual',
     'llm-review',
 ];
@@ -38762,6 +38770,622 @@ function formatTestCountRegressionWarning(result) {
     lines.push('</details>');
     return lines.join('\n');
 }
+
+
+/***/ }),
+
+/***/ 1304:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+/**
+ * Backend Checks Gate
+ *
+ * NestJS/backend convention enforcement:
+ * 1. Repository Pattern Enforcement (S066) — no Prisma in non-repository files
+ * 2. PrismaService Injection Guard (S067) — PrismaService only in repositories
+ * 3. DTO Validation Coverage (S068) — @InputType fields must have validators
+ * 4. Unprotected Controller Detection (S069) — @Controller without @UseGuards
+ * 5. Console Usage in Services (S070) — use NestJS Logger, not console
+ * 6. Silent Error Swallowing (S071) — empty or null-returning catch blocks
+ * 7. Unbounded Query Detection (S072) — findMany without take/limit
+ * 8. N+1 Query Detection (S073) — DB calls inside loops
+ *
+ * Scans .ts files in src/, skipping *.spec.ts and *.repository.ts where applicable.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.backendChecksGate = void 0;
+exports.scanForPrismaInService = scanForPrismaInService;
+exports.scanForPrismaServiceInjection = scanForPrismaServiceInjection;
+exports.scanForMissingDtoValidators = scanForMissingDtoValidators;
+exports.scanForUnprotectedControllers = scanForUnprotectedControllers;
+exports.scanForConsoleInService = scanForConsoleInService;
+exports.scanForSilentCatch = scanForSilentCatch;
+exports.scanForUnboundedFindMany = scanForUnboundedFindMany;
+exports.scanForNPlusOneQueries = scanForNPlusOneQueries;
+const core = __importStar(__nccwpck_require__(7484));
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+const SCANNABLE_EXTENSIONS = ['.ts'];
+/** Safe array accessor — returns empty string instead of undefined */
+function at(lines, i) {
+    return lines[i] ?? '';
+}
+// ============================================================================
+// File classification helpers
+// ============================================================================
+function isRepositoryFile(filePath) {
+    return filePath.endsWith('.repository.ts');
+}
+function isSpecFile(filePath) {
+    return filePath.endsWith('.spec.ts') || filePath.endsWith('.test.ts');
+}
+function isServiceFile(filePath) {
+    return (filePath.endsWith('.service.ts') ||
+        filePath.endsWith('.resolver.ts') ||
+        filePath.endsWith('.handler.ts') ||
+        filePath.endsWith('.scheduler.ts') ||
+        filePath.endsWith('.consumer.ts') ||
+        filePath.endsWith('.processor.ts'));
+}
+function isControllerFile(filePath) {
+    return filePath.endsWith('.controller.ts');
+}
+function isBackendSourceFile(filePath) {
+    return (!isSpecFile(filePath) &&
+        filePath.endsWith('.ts') &&
+        !filePath.includes('node_modules') &&
+        !filePath.includes('dist/'));
+}
+function violationToAnnotation(v) {
+    const annotation = {
+        file: v.file,
+        line: v.line,
+        message: v.message,
+        severity: v.severity === 'warning' ? 'warning' : 'error',
+        ruleId: v.ruleId,
+        title: v.ruleId,
+    };
+    if (v.column !== undefined)
+        annotation.column = v.column;
+    return annotation;
+}
+// ============================================================================
+// S066: Repository Pattern — no Prisma calls in non-repository files
+// ============================================================================
+function scanForPrismaInService(content, filePath, relPath) {
+    if (isRepositoryFile(filePath) || isSpecFile(filePath))
+        return [];
+    const violations = [];
+    const lines = content.split('\n');
+    // Match this.prisma. or this.prismaService. calls
+    const prismaCallPattern = /this\.(prisma|prismaService)\s*\.\s*\w+/;
+    for (let i = 0; i < lines.length; i++) {
+        const line = at(lines, i);
+        if (prismaCallPattern.test(line)) {
+            violations.push({
+                violationType: 'prisma-in-service',
+                ruleId: 'backend/no-prisma-in-service',
+                file: relPath,
+                line: i + 1,
+                column: line.search(prismaCallPattern) + 1,
+                message: 'Direct Prisma call in non-repository file. All DB access must go through the repository layer.',
+                gate: 'backend-checks',
+                severity: 'error',
+                suggestion: 'Move this query to the appropriate repository method and inject the repository instead.',
+            });
+        }
+    }
+    return violations;
+}
+// ============================================================================
+// S067: PrismaService injection outside repositories
+// ============================================================================
+function scanForPrismaServiceInjection(content, filePath, relPath) {
+    if (isRepositoryFile(filePath) || isSpecFile(filePath))
+        return [];
+    const violations = [];
+    const lines = content.split('\n');
+    // Match constructor params containing PrismaService
+    const constructorPattern = /constructor\s*\(/;
+    const prismaServiceParam = /private\s+(?:readonly\s+)?\w+\s*:\s*PrismaService/;
+    let inConstructor = false;
+    let constructorDepth = 0;
+    let constructorStart = -1;
+    for (let i = 0; i < lines.length; i++) {
+        const line = at(lines, i);
+        if (constructorPattern.test(line)) {
+            inConstructor = true;
+            constructorStart = i;
+            constructorDepth = 0;
+        }
+        if (inConstructor) {
+            constructorDepth += (line.match(/\(/g) || []).length;
+            constructorDepth -= (line.match(/\)/g) || []).length;
+            if (prismaServiceParam.test(line)) {
+                violations.push({
+                    violationType: 'prisma-service-injection',
+                    ruleId: 'backend/no-prisma-service-injection',
+                    file: relPath,
+                    line: i + 1,
+                    column: line.search(prismaServiceParam) + 1,
+                    message: 'PrismaService injected in non-repository file. Only repository classes may depend on PrismaService.',
+                    gate: 'backend-checks',
+                    severity: 'error',
+                    suggestion: 'Inject the repository interface instead of PrismaService directly.',
+                });
+            }
+            if (constructorDepth <= 0 && i > constructorStart) {
+                inConstructor = false;
+            }
+        }
+    }
+    return violations;
+}
+// ============================================================================
+// S068: DTO validation — @InputType fields must have class-validator decorators
+// ============================================================================
+const CLASS_VALIDATOR_DECORATORS = [
+    '@IsString',
+    '@IsNumber',
+    '@IsInt',
+    '@IsBoolean',
+    '@IsEmail',
+    '@IsEnum',
+    '@IsArray',
+    '@IsOptional',
+    '@IsNotEmpty',
+    '@IsUUID',
+    '@IsDate',
+    '@IsUrl',
+    '@IsObject',
+    '@ValidateNested',
+    '@Min(',
+    '@Max(',
+    '@Length(',
+    '@MinLength(',
+    '@MaxLength(',
+    '@Matches(',
+    '@IsIn(',
+    '@IsPositive',
+    '@IsNegative',
+];
+function scanForMissingDtoValidators(content, filePath, relPath) {
+    if (isSpecFile(filePath))
+        return [];
+    if (!filePath.endsWith('.dto.ts') && !filePath.endsWith('.input.ts'))
+        return [];
+    const violations = [];
+    const lines = content.split('\n');
+    let hasInputTypeDecorator = false;
+    let pendingFieldLine = -1;
+    let pendingFieldCol = 0;
+    let hasValidator = false;
+    for (let i = 0; i < lines.length; i++) {
+        const line = at(lines, i).trim();
+        if (line.includes('@InputType()') || line.includes('@InputType(')) {
+            hasInputTypeDecorator = true;
+        }
+        if (!hasInputTypeDecorator)
+            continue;
+        if (line.startsWith('@Field(') || line.startsWith('@Field()')) {
+            // Start of a new field block — if previous had no validator, flag it
+            if (pendingFieldLine !== -1 && !hasValidator) {
+                violations.push({
+                    violationType: 'missing-dto-validator',
+                    ruleId: 'backend/missing-dto-validator',
+                    file: relPath,
+                    line: pendingFieldLine,
+                    column: pendingFieldCol,
+                    message: '@Field decorator without a class-validator decorator. All @InputType fields must be validated.',
+                    gate: 'backend-checks',
+                    severity: 'warning',
+                    suggestion: 'Add @IsString(), @IsEmail(), @IsUUID() or another class-validator decorator above this @Field.',
+                });
+            }
+            // Start tracking new field
+            pendingFieldLine = i + 1;
+            pendingFieldCol = at(lines, i).search(/@Field/) + 1;
+            hasValidator = false;
+        }
+        // Check if current line has a class-validator decorator
+        if (CLASS_VALIDATOR_DECORATORS.some((d) => line.startsWith(d))) {
+            hasValidator = true;
+        }
+        // Reset on class/method boundary
+        if (line.startsWith('class ') || (line.startsWith('}') && pendingFieldLine !== -1)) {
+            if (pendingFieldLine !== -1 && !hasValidator && line.startsWith('class ')) {
+                // New class — don't flag across class boundaries
+            }
+        }
+    }
+    // Check last pending field
+    if (pendingFieldLine !== -1 && !hasValidator && hasInputTypeDecorator) {
+        violations.push({
+            violationType: 'missing-dto-validator',
+            ruleId: 'backend/missing-dto-validator',
+            file: relPath,
+            line: pendingFieldLine,
+            column: pendingFieldCol,
+            message: '@Field decorator without a class-validator decorator. All @InputType fields must be validated.',
+            gate: 'backend-checks',
+            severity: 'warning',
+            suggestion: 'Add a class-validator decorator above this @Field.',
+        });
+    }
+    return violations;
+}
+// ============================================================================
+// S069: Unprotected controllers — @Controller without @UseGuards
+// ============================================================================
+function scanForUnprotectedControllers(content, filePath, relPath) {
+    if (!isControllerFile(filePath) || isSpecFile(filePath))
+        return [];
+    const violations = [];
+    const lines = content.split('\n');
+    // Check if file has any guard usage
+    const hasClassLevelGuard = /@UseGuards\s*\(/.test(content) ||
+        /@Public\s*\(\s*\)/.test(content) || // common public decorator
+        /@SkipAuth\s*\(\s*\)/.test(content);
+    if (hasClassLevelGuard)
+        return [];
+    // No guard found anywhere — flag the @Controller decorator
+    for (let i = 0; i < lines.length; i++) {
+        const line = at(lines, i);
+        if (/@Controller\s*\(/.test(line)) {
+            violations.push({
+                violationType: 'unprotected-controller',
+                ruleId: 'backend/unprotected-controller',
+                file: relPath,
+                line: i + 1,
+                column: line.search(/@Controller/) + 1,
+                message: 'Controller has no @UseGuards() decorator. Every controller must be explicitly guarded or marked @Public().',
+                gate: 'backend-checks',
+                severity: 'warning',
+                suggestion: 'Add @UseGuards(JwtAuthGuard) at the class level, or @Public() for intentionally public endpoints.',
+            });
+        }
+    }
+    return violations;
+}
+// ============================================================================
+// S070: Console usage in service files
+// ============================================================================
+function scanForConsoleInService(content, filePath, relPath) {
+    if (!isServiceFile(filePath) || isSpecFile(filePath))
+        return [];
+    const violations = [];
+    const lines = content.split('\n');
+    const consolePattern = /\bconsole\.(log|warn|error|info|debug)\s*\(/;
+    for (let i = 0; i < lines.length; i++) {
+        const line = at(lines, i);
+        // Skip commented lines
+        if (line.trim().startsWith('//') || line.trim().startsWith('*'))
+            continue;
+        if (consolePattern.test(line)) {
+            violations.push({
+                violationType: 'console-in-service',
+                ruleId: 'backend/no-console-in-service',
+                file: relPath,
+                line: i + 1,
+                column: line.search(consolePattern) + 1,
+                message: 'console.* in service file. Use NestJS Logger for structured, level-aware logging.',
+                gate: 'backend-checks',
+                severity: 'warning',
+                suggestion: "Replace with this.logger.log(...) / this.logger.error(...) from NestJS Logger.",
+            });
+        }
+    }
+    return violations;
+}
+// ============================================================================
+// S071: Silent error swallowing — empty catch or catch returning null
+// ============================================================================
+function scanForSilentCatch(content, filePath, relPath) {
+    if (isSpecFile(filePath))
+        return [];
+    const violations = [];
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = at(lines, i);
+        if (/\}\s*catch\s*\(/.test(line) || /catch\s*\(/.test(line)) {
+            // Look ahead for the catch body
+            const catchStart = i;
+            let depth = 0;
+            let bodyLines = [];
+            let j = i;
+            // Find opening brace of catch block
+            while (j < lines.length && !at(lines, j).includes('{'))
+                j++;
+            if (j >= lines.length)
+                continue;
+            // Collect body lines
+            for (let k = j; k < lines.length && k < j + 10; k++) {
+                const kLine = at(lines, k);
+                depth += (kLine.match(/\{/g) || []).length;
+                depth -= (kLine.match(/\}/g) || []).length;
+                bodyLines.push(kLine.trim());
+                if (depth <= 0)
+                    break;
+            }
+            const bodyText = bodyLines.join(' ').replace(/\s+/g, ' ');
+            // Empty catch: just braces or whitespace
+            const isEmpty = /^\{[\s]*\}$/.test(bodyText.trim());
+            // Silent return: catch returns null/undefined/false with no logging
+            const isSilentReturn = /\{[\s]*return\s+(null|undefined|false|0|'')[\s]*;[\s]*\}/.test(bodyText) &&
+                !/logger|console|throw|Sentry|captureException/.test(bodyText);
+            if (isEmpty || isSilentReturn) {
+                violations.push({
+                    violationType: 'silent-catch',
+                    ruleId: 'backend/no-silent-catch',
+                    file: relPath,
+                    line: catchStart + 1,
+                    column: 1,
+                    message: isEmpty
+                        ? 'Empty catch block silently swallows errors. Log or rethrow.'
+                        : 'Catch block returns null/undefined without logging. Errors are lost silently.',
+                    gate: 'backend-checks',
+                    severity: 'warning',
+                    suggestion: 'Add this.logger.error(err) or throw a typed AppError before returning.',
+                });
+            }
+        }
+    }
+    return violations;
+}
+// ============================================================================
+// S072: Unbounded findMany — missing take/limit
+// ============================================================================
+function scanForUnboundedFindMany(content, filePath, relPath) {
+    if (!isRepositoryFile(filePath) || isSpecFile(filePath))
+        return [];
+    const violations = [];
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = at(lines, i);
+        if (/\.findMany\s*\(/.test(line)) {
+            // Look ahead up to 15 lines for take/limit/skip pattern
+            const chunk = lines.slice(i, Math.min(i + 15, lines.length)).join('\n');
+            const hasTake = /\btake\s*:/.test(chunk);
+            const hasLimit = /\blimit\s*:/.test(chunk);
+            if (!hasTake && !hasLimit) {
+                violations.push({
+                    violationType: 'unbounded-find-many',
+                    ruleId: 'backend/unbounded-find-many',
+                    file: relPath,
+                    line: i + 1,
+                    column: line.search(/\.findMany/) + 1,
+                    message: 'findMany() without take/limit. Unbounded queries are a scale risk — they return all rows at any data volume.',
+                    gate: 'backend-checks',
+                    severity: 'warning',
+                    suggestion: 'Add take: N or accept a pagination input (take, skip) to bound the result set.',
+                });
+            }
+        }
+    }
+    return violations;
+}
+// ============================================================================
+// S073: N+1 query detection — DB calls inside loops
+// ============================================================================
+function scanForNPlusOneQueries(content, filePath, relPath) {
+    if (isSpecFile(filePath))
+        return [];
+    const violations = [];
+    const lines = content.split('\n');
+    const loopPatterns = [
+        /\.forEach\s*\(\s*(?:async\s*)?\(?\w+\)?\s*=>/,
+        /\.map\s*\(\s*(?:async\s*)?\(?\w+\)?\s*=>/,
+        /\.filter\s*\(\s*(?:async\s*)?\(?\w+\)?\s*=>/,
+        /for\s*\(\s*(?:const|let)\s+\w+\s+of\s+/,
+        /for\s*\(\s*(?:const|let)\s+\w+\s+in\s+/,
+        /for\s*\(.*;\s*\w+\s*[<>]/,
+        /while\s*\(/,
+    ];
+    const dbCallPatterns = [
+        /await\s+this\.\w+Repository\./,
+        /await\s+this\.\w+Repo\./,
+        /await\s+this\.prisma\./,
+        /\.findOne\s*\(/,
+        /\.findMany\s*\(/,
+        /\.findFirst\s*\(/,
+        /\.create\s*\(\s*\{/,
+        /\.update\s*\(\s*\{/,
+        /\.upsert\s*\(/,
+    ];
+    for (let i = 0; i < lines.length; i++) {
+        const line = at(lines, i);
+        const isLoopLine = loopPatterns.some((p) => p.test(line));
+        if (isLoopLine) {
+            // Scan the next 15 lines for a DB call inside this loop
+            const lookahead = lines.slice(i + 1, Math.min(i + 16, lines.length));
+            let loopDepth = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+            for (let j = 0; j < lookahead.length; j++) {
+                const innerLine = at(lookahead, j);
+                loopDepth += (innerLine.match(/\{/g) || []).length;
+                loopDepth -= (innerLine.match(/\}/g) || []).length;
+                // Stop if we've exited the loop body
+                if (loopDepth < 0)
+                    break;
+                const hasDbCall = dbCallPatterns.some((p) => p.test(innerLine));
+                if (hasDbCall) {
+                    violations.push({
+                        violationType: 'n-plus-one-query',
+                        ruleId: 'backend/no-n-plus-one-query',
+                        file: relPath,
+                        line: i + 1,
+                        column: 1,
+                        message: 'Possible N+1 query: DB call detected inside a loop. This executes one query per iteration.',
+                        gate: 'backend-checks',
+                        severity: 'warning',
+                        suggestion: 'Batch the IDs and use a single findMany({ where: { id: { in: ids } } }) outside the loop, then map results.',
+                    });
+                    break; // One violation per loop
+                }
+            }
+        }
+    }
+    return violations;
+}
+// ============================================================================
+// File scanner
+// ============================================================================
+function collectSourceFiles(cwd) {
+    const files = [];
+    function walk(dir) {
+        let entries;
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        }
+        catch {
+            return;
+        }
+        for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                if (entry.name === 'node_modules' ||
+                    entry.name === 'dist' ||
+                    entry.name === '.git' ||
+                    entry.name === 'coverage') {
+                    continue;
+                }
+                walk(fullPath);
+            }
+            else if (entry.isFile() &&
+                SCANNABLE_EXTENSIONS.includes(path.extname(entry.name)) &&
+                isBackendSourceFile(fullPath)) {
+                files.push(fullPath);
+            }
+        }
+    }
+    // Only scan src/ directory — skip root config files, migration files, etc.
+    const srcDir = path.join(cwd, 'src');
+    if (fs.existsSync(srcDir)) {
+        walk(srcDir);
+    }
+    return files;
+}
+// ============================================================================
+// Gate implementation
+// ============================================================================
+exports.backendChecksGate = {
+    name: 'backend-checks',
+    displayName: 'Backend Checks',
+    async canRun(cwd) {
+        // Run if src/ exists and has .ts files
+        const srcDir = path.join(cwd, 'src');
+        if (!fs.existsSync(srcDir))
+            return false;
+        // Check for NestJS signature (main.ts or app.module.ts)
+        const hasNestSig = fs.existsSync(path.join(srcDir, 'main.ts')) ||
+            fs.existsSync(path.join(srcDir, 'app.module.ts'));
+        return hasNestSig;
+    },
+    async run(options) {
+        const start = Date.now();
+        const { cwd } = options;
+        core.info('Scanning backend source files for convention violations...');
+        const canRun = await exports.backendChecksGate.canRun(cwd);
+        if (!canRun) {
+            return {
+                gate: 'backend-checks',
+                status: 'skip',
+                totalViolations: 0,
+                newViolations: 0,
+                existingViolations: 0,
+                ignoredViolations: 0,
+                annotations: [],
+                violations: [],
+                timeMs: Date.now() - start,
+                message: 'No NestJS project detected (src/main.ts or src/app.module.ts not found)',
+            };
+        }
+        const sourceFiles = collectSourceFiles(cwd);
+        core.info(`Scanning ${sourceFiles.length} backend source files...`);
+        const allViolations = [];
+        for (const filePath of sourceFiles) {
+            let content;
+            try {
+                content = fs.readFileSync(filePath, 'utf8');
+            }
+            catch {
+                core.debug(`Could not read ${filePath}`);
+                continue;
+            }
+            const relPath = path.relative(cwd, filePath).replace(/\\/g, '/');
+            allViolations.push(...scanForPrismaInService(content, filePath, relPath));
+            allViolations.push(...scanForPrismaServiceInjection(content, filePath, relPath));
+            allViolations.push(...scanForMissingDtoValidators(content, filePath, relPath));
+            allViolations.push(...scanForUnprotectedControllers(content, filePath, relPath));
+            allViolations.push(...scanForConsoleInService(content, filePath, relPath));
+            allViolations.push(...scanForSilentCatch(content, filePath, relPath));
+            allViolations.push(...scanForUnboundedFindMany(content, filePath, relPath));
+            allViolations.push(...scanForNPlusOneQueries(content, filePath, relPath));
+        }
+        const errorViolations = allViolations.filter((v) => v.severity === 'error');
+        const hasErrors = errorViolations.length > 0;
+        const message = allViolations.length === 0
+            ? 'No backend convention violations found'
+            : `${allViolations.length} violation(s) found (${errorViolations.length} blocking, ${allViolations.length - errorViolations.length} warnings)`;
+        core.info(message);
+        if (allViolations.length > 0) {
+            // Log summary by rule
+            const byRule = allViolations.reduce((acc, v) => {
+                acc[v.ruleId] = (acc[v.ruleId] || 0) + 1;
+                return acc;
+            }, {});
+            for (const [rule, count] of Object.entries(byRule)) {
+                core.info(`  ${rule}: ${count}`);
+            }
+        }
+        return {
+            gate: 'backend-checks',
+            status: hasErrors ? 'fail' : allViolations.length > 0 ? 'fail' : 'pass',
+            totalViolations: allViolations.length,
+            newViolations: allViolations.length,
+            existingViolations: 0,
+            ignoredViolations: 0,
+            annotations: allViolations.map(violationToAnnotation),
+            violations: allViolations,
+            timeMs: Date.now() - start,
+            message,
+        };
+    },
+};
 
 
 /***/ }),
@@ -42676,7 +43300,8 @@ exports["default"] = exports.gitleaksGate;
  * Exports all gate implementations and common types.
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.runLLMReviewGate = exports.createLLMReviewGate = exports.visualResultToAnnotation = exports.runVisualGate = exports.visualGate = exports.frontendViolationToAnnotation = exports.scanForImportPathInconsistency = exports.analyzeComponentGraphImpact = exports.buildComponentGraph = exports.scanForImportCycles = exports.detectCycles = exports.buildDependencyGraph = exports.scanForTypeScriptStrictIssues = exports.scanForImageWithoutDimensions = exports.calculateBundleDelta = exports.scanForA11yIssues = exports.scanForServerClientBoundary = exports.scanForRerenderTraps = exports.scanForMissingDependencies = exports.scanForMissingKeys = exports.scanForUnhandledAsyncState = exports.frontendChecksGate = exports.designSystemViolationToAnnotation = exports.scanForFontSizeViolations = exports.scanForSpacingViolations = exports.scanForHardcodedColors = exports.scanForBannedClasses = exports.designSystemGate = exports.npmAuditViolationToAnnotation = exports.parseNpmAuditOutput = exports.npmAuditGate = exports.gitleaksViolationToAnnotation = exports.gitleaksGetChangedFiles = exports.parseGitleaksOutput = exports.gitleaksGate = exports.semgrepViolationToAnnotation = exports.semgrepGetChangedFiles = exports.parseSemgrepOutputWithSeverity = exports.parseSemgrepOutput = exports.semgrepGate = exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
+exports.scanForMissingDtoValidators = exports.scanForPrismaServiceInjection = exports.scanForPrismaInService = exports.backendChecksGate = exports.visualResultToAnnotation = exports.runVisualGate = exports.visualGate = exports.frontendViolationToAnnotation = exports.scanForImportPathInconsistency = exports.analyzeComponentGraphImpact = exports.buildComponentGraph = exports.scanForImportCycles = exports.detectCycles = exports.buildDependencyGraph = exports.scanForTypeScriptStrictIssues = exports.scanForImageWithoutDimensions = exports.calculateBundleDelta = exports.scanForA11yIssues = exports.scanForServerClientBoundary = exports.scanForRerenderTraps = exports.scanForMissingDependencies = exports.scanForMissingKeys = exports.scanForUnhandledAsyncState = exports.frontendChecksGate = exports.designSystemViolationToAnnotation = exports.scanForFontSizeViolations = exports.scanForSpacingViolations = exports.scanForHardcodedColors = exports.scanForBannedClasses = exports.designSystemGate = exports.npmAuditViolationToAnnotation = exports.parseNpmAuditOutput = exports.npmAuditGate = exports.gitleaksViolationToAnnotation = exports.gitleaksGetChangedFiles = exports.parseGitleaksOutput = exports.gitleaksGate = exports.semgrepViolationToAnnotation = exports.semgrepGetChangedFiles = exports.parseSemgrepOutputWithSeverity = exports.parseSemgrepOutput = exports.semgrepGate = exports.eslintViolationToAnnotation = exports.getChangedFiles = exports.parseESLintOutputWithSeverity = exports.parseESLintOutput = exports.eslintGate = exports.violationToAnnotation = exports.parseTypeScriptOutput = exports.typescriptGate = void 0;
+exports.runLLMReviewGate = exports.createLLMReviewGate = exports.scanForNPlusOneQueries = exports.scanForUnboundedFindMany = exports.scanForSilentCatch = exports.scanForConsoleInService = exports.scanForUnprotectedControllers = void 0;
 // TypeScript Gate
 var typescript_1 = __nccwpck_require__(9249);
 Object.defineProperty(exports, "typescriptGate", ({ enumerable: true, get: function () { return typescript_1.typescriptGate; } }));
@@ -42739,6 +43364,17 @@ var visual_1 = __nccwpck_require__(5818);
 Object.defineProperty(exports, "visualGate", ({ enumerable: true, get: function () { return visual_1.visualGate; } }));
 Object.defineProperty(exports, "runVisualGate", ({ enumerable: true, get: function () { return visual_1.runVisualGate; } }));
 Object.defineProperty(exports, "visualResultToAnnotation", ({ enumerable: true, get: function () { return visual_1.resultToAnnotation; } }));
+// Backend Checks Gate
+var backend_checks_1 = __nccwpck_require__(1304);
+Object.defineProperty(exports, "backendChecksGate", ({ enumerable: true, get: function () { return backend_checks_1.backendChecksGate; } }));
+Object.defineProperty(exports, "scanForPrismaInService", ({ enumerable: true, get: function () { return backend_checks_1.scanForPrismaInService; } }));
+Object.defineProperty(exports, "scanForPrismaServiceInjection", ({ enumerable: true, get: function () { return backend_checks_1.scanForPrismaServiceInjection; } }));
+Object.defineProperty(exports, "scanForMissingDtoValidators", ({ enumerable: true, get: function () { return backend_checks_1.scanForMissingDtoValidators; } }));
+Object.defineProperty(exports, "scanForUnprotectedControllers", ({ enumerable: true, get: function () { return backend_checks_1.scanForUnprotectedControllers; } }));
+Object.defineProperty(exports, "scanForConsoleInService", ({ enumerable: true, get: function () { return backend_checks_1.scanForConsoleInService; } }));
+Object.defineProperty(exports, "scanForSilentCatch", ({ enumerable: true, get: function () { return backend_checks_1.scanForSilentCatch; } }));
+Object.defineProperty(exports, "scanForUnboundedFindMany", ({ enumerable: true, get: function () { return backend_checks_1.scanForUnboundedFindMany; } }));
+Object.defineProperty(exports, "scanForNPlusOneQueries", ({ enumerable: true, get: function () { return backend_checks_1.scanForNPlusOneQueries; } }));
 // LLM Review Gate
 var llm_review_1 = __nccwpck_require__(3604);
 Object.defineProperty(exports, "createLLMReviewGate", ({ enumerable: true, get: function () { return llm_review_1.createLLMReviewGate; } }));
@@ -45378,6 +46014,19 @@ async function run() {
                     allSuppressions.push(...filterResult.suppressions);
                 }
             }
+            else if (gateName === 'backend-checks') {
+                // Backend convention enforcement gate
+                result = await gates_1.backendChecksGate.run({
+                    cwd,
+                    timeoutMs,
+                    createAnnotations: true,
+                });
+                if (result.violations.length > 0) {
+                    const filterResult = filterViolations(result, baseline, ignorePatterns, cwd);
+                    result = filterResult.gateResult;
+                    allSuppressions.push(...filterResult.suppressions);
+                }
+            }
             else {
                 // Unsupported gate (build, test not yet implemented)
                 result = {
@@ -47777,6 +48426,7 @@ exports.GATE_DISPLAY_NAMES = {
     'npm-audit': 'npm Audit',
     'design-system': 'Design System',
     'frontend-checks': 'Frontend Checks',
+    'backend-checks': 'Backend Checks',
     visual: 'Visual Regression',
     'llm-review': 'LLM Code Review',
 };

@@ -229,6 +229,7 @@ export const GATE_DISPLAY_NAMES: Record<GateName, string> = {
   'npm-audit': 'npm Audit',
   'design-system': 'Design System',
   'frontend-checks': 'Frontend Checks',
+  'backend-checks': 'Backend Checks',
   visual: 'Visual Regression',
   'llm-review': 'LLM Code Review',
 };

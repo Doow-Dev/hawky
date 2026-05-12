@@ -95,6 +95,19 @@ export {
   resultToAnnotation as visualResultToAnnotation,
 } from './visual';
 
+// Backend Checks Gate
+export {
+  backendChecksGate,
+  scanForPrismaInService,
+  scanForPrismaServiceInjection,
+  scanForMissingDtoValidators,
+  scanForUnprotectedControllers,
+  scanForConsoleInService,
+  scanForSilentCatch,
+  scanForUnboundedFindMany,
+  scanForNPlusOneQueries,
+} from './backend-checks';
+
 // LLM Review Gate
 export {
   createLLMReviewGate,

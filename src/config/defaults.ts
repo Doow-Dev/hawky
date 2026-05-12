@@ -112,6 +112,12 @@ export const LLM_REVIEW_GATE_DEFAULTS: GateConfig = {
 /**
  * Map of gate names to their default configurations
  */
+export const BACKEND_CHECKS_GATE_DEFAULTS: GateConfig = {
+  enabled: false, // opt-in: only meaningful for NestJS repos
+  blocking: true,
+  timeout: 60,
+};
+
 export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
   typescript: TYPESCRIPT_GATE_DEFAULTS,
   build: BUILD_GATE_DEFAULTS,
@@ -122,6 +128,7 @@ export const GATE_DEFAULTS: Record<GateName, GateConfig> = {
   'npm-audit': NPM_AUDIT_GATE_DEFAULTS,
   'design-system': DESIGN_SYSTEM_GATE_DEFAULTS,
   'frontend-checks': FRONTEND_CHECKS_GATE_DEFAULTS,
+  'backend-checks': BACKEND_CHECKS_GATE_DEFAULTS,
   visual: VISUAL_GATE_DEFAULTS,
   'llm-review': LLM_REVIEW_GATE_DEFAULTS,
 };
@@ -200,6 +207,7 @@ export function createDefaultConfig(): HawkyConfig {
       'npm-audit': { ...NPM_AUDIT_GATE_DEFAULTS },
       'design-system': { ...DESIGN_SYSTEM_GATE_DEFAULTS },
       'frontend-checks': { ...FRONTEND_CHECKS_GATE_DEFAULTS },
+      'backend-checks': { ...BACKEND_CHECKS_GATE_DEFAULTS },
       visual: { ...VISUAL_GATE_DEFAULTS },
       'llm-review': { ...LLM_REVIEW_GATE_DEFAULTS },
     },

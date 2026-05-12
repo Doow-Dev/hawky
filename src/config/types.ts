@@ -23,6 +23,7 @@ export type GateName =
   | 'npm-audit'
   | 'design-system'
   | 'frontend-checks'
+  | 'backend-checks'
   | 'visual'
   | 'llm-review';
 
@@ -39,6 +40,7 @@ export const GATE_NAMES: GateName[] = [
   'npm-audit',
   'design-system',
   'frontend-checks',
+  'backend-checks',
   'visual',
   'llm-review',
 ];

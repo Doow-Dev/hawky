@@ -99,6 +99,12 @@ inputs:
     required: false
     default: ''
 
+  # Backend Convention Checks
+  backend_checks_enabled:
+    description: 'Enable backend convention checks (NestJS repository pattern, DTO validation, N+1 queries, unbounded queries)'
+    required: false
+    default: 'false'
+
   # Sprint Integration (E006)
   sprint_enabled:
     description: 'Enable sprint tracking integration'

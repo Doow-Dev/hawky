@@ -9,7 +9,7 @@ export type { StackType, StacksConfig, StackOverrideConfig } from '../stack/type
 /**
  * Gate names supported by Hawky
  */
-export type GateName = 'typescript' | 'build' | 'test' | 'eslint' | 'semgrep' | 'gitleaks' | 'npm-audit' | 'design-system' | 'frontend-checks' | 'visual' | 'llm-review';
+export type GateName = 'typescript' | 'build' | 'test' | 'eslint' | 'semgrep' | 'gitleaks' | 'npm-audit' | 'design-system' | 'frontend-checks' | 'backend-checks' | 'visual' | 'llm-review';
 /**
  * All valid gate names
  */

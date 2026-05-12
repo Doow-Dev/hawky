@@ -29,6 +29,7 @@ import {
   semgrepGate,
   gitleaksGate,
   designSystemGate,
+  backendChecksGate,
   violationToAnnotation,
   type GateResult,
   type Violation,
@@ -550,6 +551,19 @@ async function run(): Promise<void> {
         });
 
         // Apply baseline and hawkyignore filtering
+        if (result.violations.length > 0) {
+          const filterResult = filterViolations(result, baseline, ignorePatterns, cwd);
+          result = filterResult.gateResult;
+          allSuppressions.push(...filterResult.suppressions);
+        }
+      } else if (gateName === 'backend-checks') {
+        // Backend convention enforcement gate
+        result = await backendChecksGate.run({
+          cwd,
+          timeoutMs,
+          createAnnotations: true,
+        });
+
         if (result.violations.length > 0) {
           const filterResult = filterViolations(result, baseline, ignorePatterns, cwd);
           result = filterResult.gateResult;

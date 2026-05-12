@@ -1,0 +1,289 @@
+rules:
+  # C001: No direct Prisma access outside repository files
+  # Enforces the repository pattern — all DB access goes through the repository layer.
+  - id: hawky-no-prisma-in-service
+    message: >-
+      Direct Prisma call in a non-repository file. All database access must go through
+      the repository layer. Move this query to the appropriate *.repository.ts and inject
+      the repository interface.
+    severity: ERROR
+    languages: [typescript]
+    pattern-either:
+      - pattern: this.prisma.$METHOD(...)
+      - pattern: this.prismaService.$METHOD(...)
+    paths:
+      exclude:
+        - '**/*.repository.ts'
+        - '**/*.spec.ts'
+        - '**/*.test.ts'
+        - '**/migrations/**'
+    metadata:
+      category: convention
+      rule: repository-pattern
+      confidence: HIGH
+
+  # C002: PrismaService injected in non-repository class
+  - id: hawky-prisma-injection-in-service
+    message: >-
+      PrismaService injected outside a repository file. Only repository classes may
+      depend on PrismaService directly. Inject the repository interface instead.
+    severity: ERROR
+    languages: [typescript]
+    pattern: |
+      constructor(..., private $X: PrismaService, ...) { ... }
+    paths:
+      exclude:
+        - '**/*.repository.ts'
+        - '**/*.spec.ts'
+        - '**/*.test.ts'
+    metadata:
+      category: convention
+      rule: repository-pattern
+      confidence: HIGH
+
+  # C003: N+1 query — DB call inside forEach loop
+  - id: hawky-n-plus-one-foreach
+    message: >-
+      Possible N+1 query: repository/DB call inside a forEach loop. This executes one
+      query per item. Collect IDs and use a single batched findMany({ where: { id: { in: ids } } }).
+    severity: WARNING
+    languages: [typescript]
+    patterns:
+      - pattern: |
+          $ITEMS.forEach(async ($ITEM) => {
+            ...
+            await $REPO.$METHOD(...)
+            ...
+          })
+    metadata:
+      category: convention
+      rule: n-plus-one-query
+      confidence: MEDIUM
+
+  # C004: N+1 query — DB call inside map loop
+  - id: hawky-n-plus-one-map
+    message: >-
+      Possible N+1 query: repository/DB call inside a .map() loop. This executes one
+      query per item. Collect IDs and use a single batched findMany outside the loop.
+    severity: WARNING
+    languages: [typescript]
+    patterns:
+      - pattern: |
+          $ITEMS.map(async ($ITEM) => {
+            ...
+            await $REPO.$METHOD(...)
+            ...
+          })
+    metadata:
+      category: convention
+      rule: n-plus-one-query
+      confidence: MEDIUM
+
+  # C005: Unbounded Prisma findMany without take
+  # A findMany with no take/limit returns every matching row — scale bomb.
+  - id: hawky-unbounded-find-many
+    message: >-
+      prisma.*.findMany() called without take or limit. This returns all matching rows
+      and is a scale risk. Add take: N or accept pagination inputs (take, skip).
+    severity: WARNING
+    languages: [typescript]
+    patterns:
+      - pattern: $DB.findMany({...})
+      - pattern-not: $DB.findMany({..., take: $N, ...})
+      - pattern-not: $DB.findMany({..., limit: $N, ...})
+    paths:
+      include:
+        - '**/*.repository.ts'
+    metadata:
+      category: convention
+      rule: unbounded-query
+      confidence: MEDIUM
+
+  # C006: Silent error swallowing — empty catch block
+  - id: hawky-empty-catch-block
+    message: >-
+      Empty catch block silently swallows errors. Log with this.logger.error() and/or
+      rethrow as a typed AppError so failures are observable.
+    severity: WARNING
+    languages: [typescript]
+    pattern: |
+      try {
+        ...
+      } catch ($E) {
+      }
+    paths:
+      exclude:
+        - '**/*.spec.ts'
+        - '**/*.test.ts'
+    metadata:
+      category: convention
+      rule: silent-catch
+      confidence: HIGH
+
+  # C007: console.* in service/resolver files
+  - id: hawky-console-in-service
+    message: >-
+      console.* in service file. Use NestJS Logger (this.logger.log/warn/error) for
+      structured, level-aware, testable logging.
+    severity: WARNING
+    languages: [typescript]
+    pattern-either:
+      - pattern: console.log(...)
+      - pattern: console.warn(...)
+      - pattern: console.error(...)
+      - pattern: console.info(...)
+      - pattern: console.debug(...)
+    paths:
+      include:
+        - '**/*.service.ts'
+        - '**/*.resolver.ts'
+        - '**/*.handler.ts'
+        - '**/*.scheduler.ts'
+        - '**/*.consumer.ts'
+      exclude:
+        - '**/*.spec.ts'
+        - '**/*.test.ts'
+    metadata:
+      category: convention
+      rule: use-nestjs-logger
+      confidence: HIGH
+
+  # C008: process.env accessed directly outside env config
+  - id: hawky-process-env-direct-access
+    message: >-
+      process.env accessed directly. Route all environment variable access through
+      your central env config/validator so missing or malformed values fail at startup.
+    severity: WARNING
+    languages: [typescript]
+    pattern: process.env[$KEY]
+    paths:
+      exclude:
+        - '**/env.ts'
+        - '**/env.config.ts'
+        - '**/configuration.ts'
+        - '**/config.ts'
+        - '**/*.spec.ts'
+        - '**/*.test.ts'
+        - '**/infisical*'
+        - '**/main.ts'
+    metadata:
+      category: convention
+      rule: env-centralisation
+      confidence: MEDIUM
+
+  # C009: process.env dot notation outside env config
+  - id: hawky-process-env-dot-access
+    message: >-
+      process.env.VARIABLE accessed directly. Route all environment variable access
+      through your central env config/validator so missing values fail at startup.
+    severity: WARNING
+    languages: [typescript]
+    pattern: process.env.$VAR
+    paths:
+      exclude:
+        - '**/env.ts'
+        - '**/env.config.ts'
+        - '**/configuration.ts'
+        - '**/config.ts'
+        - '**/*.spec.ts'
+        - '**/*.test.ts'
+        - '**/infisical*'
+        - '**/main.ts'
+    metadata:
+      category: convention
+      rule: env-centralisation
+      confidence: MEDIUM
+
+  # C010: Sensitive field names in log statements
+  - id: hawky-sensitive-data-in-log
+    message: >-
+      Potential sensitive data in log statement. Logging passwords, tokens, secrets,
+      or PII violates data hygiene and may breach GDPR. Remove or redact before logging.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern-either:
+      - pattern: console.log(..., $X.password, ...)
+      - pattern: console.log(..., $X.token, ...)
+      - pattern: console.log(..., $X.secret, ...)
+      - pattern: console.log(..., $X.accessToken, ...)
+      - pattern: console.log(..., $X.refreshToken, ...)
+      - pattern: this.logger.log(..., $X.password, ...)
+      - pattern: this.logger.log(..., $X.token, ...)
+      - pattern: this.logger.log(..., $X.secret, ...)
+      - pattern: this.logger.error(..., $X.password, ...)
+      - pattern: this.logger.error(..., $X.token, ...)
+    metadata:
+      category: security
+      rule: sensitive-data-logging
+      cwe: ["CWE-532"]
+      owasp: ["A09:2021"]
+      confidence: MEDIUM
+
+  # C011: Hardcoded secrets / API keys in source
+  - id: hawky-hardcoded-api-key
+    message: >-
+      Possible hardcoded API key or secret in source. Store secrets in environment
+      variables or a secrets manager (Infisical). Rotate if this was committed.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern-either:
+      - pattern: const $X = "sk-..."
+      - pattern: const $X = "pk_live_..."
+      - pattern: const $X = "Bearer ey..."
+      - pattern: apiKey = "..."
+      - pattern: api_key = "..."
+      - pattern: secret = "..."
+      - pattern: password = "..."
+    paths:
+      exclude:
+        - '**/*.spec.ts'
+        - '**/*.test.ts'
+        - '**/fixtures/**'
+        - '**/mocks/**'
+    metadata:
+      category: security
+      rule: hardcoded-secrets
+      cwe: ["CWE-798"]
+      owasp: ["A07:2021"]
+      confidence: MEDIUM
+
+  # C012: any type in service/resolver files
+  - id: hawky-any-type-in-service
+    message: >-
+      Explicit 'any' type in service file undermines TypeScript's safety guarantees.
+      Use a specific type, unknown with narrowing, or a generic parameter instead.
+    severity: WARNING
+    languages: [typescript]
+    pattern-either:
+      - pattern: ": any"
+      - pattern: "as any"
+    paths:
+      include:
+        - '**/*.service.ts'
+        - '**/*.resolver.ts'
+      exclude:
+        - '**/*.spec.ts'
+        - '**/*.test.ts'
+    metadata:
+      category: convention
+      rule: no-any-in-service
+      confidence: LOW
+
+  # C013: Prisma DTO spread — unsafe object spread into Prisma create/update
+  - id: hawky-unsafe-prisma-spread
+    message: >-
+      Unsafe object spread into Prisma create/update. Unknown fields in the spread
+      cause runtime errors. Explicitly map only the fields that exist in the Prisma schema.
+    severity: WARNING
+    languages: [typescript]
+    pattern-either:
+      - pattern: $PRISMA.create({ data: { ...$INPUT } })
+      - pattern: $PRISMA.update({ data: { ...$INPUT } })
+      - pattern: $PRISMA.upsert({ create: { ...$INPUT }, update: { ...$INPUT } })
+    paths:
+      include:
+        - '**/*.repository.ts'
+    metadata:
+      category: convention
+      rule: prisma-dto-spread
+      confidence: MEDIUM

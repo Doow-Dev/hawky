@@ -52,6 +52,7 @@ export declare const LLM_REVIEW_GATE_DEFAULTS: GateConfig;
 /**
  * Map of gate names to their default configurations
  */
+export declare const BACKEND_CHECKS_GATE_DEFAULTS: GateConfig;
 export declare const GATE_DEFAULTS: Record<GateName, GateConfig>;
 /**
  * Default grace period configuration
